@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from streamlit_gsheets import GSheetsConnection  # Added for cloud sync
 import streamlit_authenticator as stauth
 import os
 from datetime import date
@@ -7,18 +8,17 @@ import yaml
 from yaml.loader import SafeLoader
 
 # --- 1. USER AUTHENTICATION SETUP ---
-# We define the users in a dictionary format the new library requires
 config = {
     'credentials': {
         'usernames': {
             'kevin': {
                 'name': 'Dressup Haiti Admin',
-                'password': 'The$100$Raven' # This will be hashed automatically
+                'password': 'The$100$Raven' 
             },
             'staff1': {
-        'name': 'Inventory Manager',
-        'password': 'secretpassword456'
-    }
+                'name': 'Inventory Manager',
+                'password': 'secretpassword456'
+            }
         }
     },
     'cookie': {
@@ -28,7 +28,6 @@ config = {
     }
 }
 
-# This part converts the plain text password into a secure hash
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
@@ -36,27 +35,20 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# Render the login widget
-# Note: The new version returns a dictionary
 login_data = authenticator.login()
 
-# Check authentication status
 if st.session_state["authentication_status"] == False:
     st.error("Username/password is incorrect")
 elif st.session_state["authentication_status"] == None:
     st.warning("Please enter your username and password")
 elif st.session_state["authentication_status"]:
     
-    # --- EVERYTHING BELOW RUNS ONLY AFTER LOGIN ---
     authenticator.logout('Logout', 'sidebar')
     st.sidebar.title(f"Welcome {st.session_state['name']}")
 
-    # --- 2. FILE SETUP ---
-    LOG_FILE = "wig_intake_log.csv"
-    EXPECTED_COLS = ["Date", "SKU", "Name", "Quantity", "User"]
-
-    if not os.path.exists(LOG_FILE):
-        pd.DataFrame(columns=EXPECTED_COLS).to_csv(LOG_FILE, index=False)
+    # --- 2. GOOGLE SHEETS CONNECTION ---
+    # This replaces the LOG_FILE for cross-device syncing
+    conn = st.connection("gsheets", type=GSheetsConnection)
 
     def clean_data(file, location_col_name):
         df = pd.read_excel(file, skiprows=1)
@@ -97,28 +89,34 @@ elif st.session_state["authentication_status"]:
             if input_sku and detected_name:
                 st.success(f"Item: {detected_name}")
 
+            # Pull existing data from Google Sheets
+            try:
+                existing_data = conn.read(ttl=0) # ttl=0 ensures it pulls the latest info
+            except:
+                existing_data = pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
+
             with st.form("intake_form", clear_on_submit=True):
                 qty = st.number_input("Quantity", min_value=1)
                 if st.form_submit_button("✅ Save Entry"):
                     if detected_name:
-                        # Save the entry with the logged-in username
-                        new_entry = pd.DataFrame([[
-                            str(date.today()), 
-                            input_sku, 
-                            detected_name, 
-                            qty, 
-                            st.session_state['username']
-                        ]], columns=EXPECTED_COLS)
+                        # Prepare new row
+                        new_row = pd.DataFrame([{
+                            "Date": str(date.today()), 
+                            "SKU": input_sku, 
+                            "Name": detected_name, 
+                            "Quantity": qty, 
+                            "User": st.session_state['username']
+                        }])
                         
-                        new_entry.to_csv(LOG_FILE, mode='a', header=False, index=False)
-                        st.success("Entry saved!")
+                        # Sync to Google Sheets
+                        updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+                        conn.update(data=updated_df)
+                        
+                        st.success("Entry saved and synced to cloud!")
                         st.rerun()
 
             st.divider()
-            st.subheader("History")
-            log_df = pd.read_csv(LOG_FILE)
-            st.dataframe(log_df.iloc[::-1], use_container_width=True)
+            st.subheader("Cloud History (Visible on Computer & Phone)")
+            st.dataframe(existing_data.iloc[::-1], use_container_width=True)
     else:
         st.info("Please upload the PV file to start.")
-
-
