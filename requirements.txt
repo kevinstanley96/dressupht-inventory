@@ -1,3 +1,6 @@
 streamlit
 pandas
+
 openpyxl
+streamlit-authenticator
+st-gsheets-connection
