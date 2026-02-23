@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+import requests
 import streamlit_authenticator as stauth
 import os
 from datetime import date
@@ -44,8 +44,39 @@ elif st.session_state["authentication_status"]:
     authenticator.logout('Logout', 'sidebar')
     st.sidebar.title(f"Welcome {st.session_state['name']}")
 
-    # --- 2. CLOUD CONNECTION ---
-    conn = st.connection("gsheets", type=GSheetsConnection)
+    # --- 2. AIRTABLE CONFIGURATION ---
+    # Using the credentials you provided
+    AIR_TOKEN = "pat1SYxIQWWcgkwy5.35f38c5bdc516561cbacc01116d09eeac8e861f3c442af68fcf19ee58e9dc72a"
+    BASE_ID = "app5eJFgtbCaJHGhc"
+    TABLE_NAME = "Shipments"
+    AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
+    HEADERS = {
+        "Authorization": f"Bearer {AIR_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    def get_airtable_data():
+        try:
+            response = requests.get(AIRTABLE_URL, headers=HEADERS)
+            if response.status_code == 200:
+                records = response.json().get('records', [])
+                if not records:
+                    return pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
+                
+                # Extract fields from Airtable JSON
+                df = pd.DataFrame([r['fields'] for r in records])
+                
+                # Ensure all columns exist even if the table is fresh
+                for col in ["Date", "SKU", "Name", "Quantity", "User"]:
+                    if col not in df.columns:
+                        df[col] = None
+                
+                return df[["Date", "SKU", "Name", "Quantity", "User"]]
+            else:
+                return pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
+        except Exception as e:
+            st.error(f"Airtable Connection Error: {e}")
+            return pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
 
     def clean_data(file, location_col_name):
         df = pd.read_excel(file, skiprows=1)
@@ -103,15 +134,13 @@ elif st.session_state["authentication_status"]:
         ])
 
         with t1:
-            st.subheader("Cloud Shipment Record")
+            st.subheader("Cloud Shipment Record (Airtable)")
             input_sku = st.text_input("Enter SKU").strip()
             detected_name = sku_to_name.get(input_sku, None)
             if input_sku and detected_name: st.success(f"Verified: {detected_name}")
 
-            try:
-                existing_data = conn.read(ttl=0)
-            except:
-                existing_data = pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
+            # Pull current cloud history
+            existing_data = get_airtable_data()
 
             with st.form("intake_form", clear_on_submit=True):
                 col_f1, col_f2 = st.columns(2)
@@ -120,20 +149,32 @@ elif st.session_state["authentication_status"]:
                 
                 if st.form_submit_button("✅ Sync to Cloud"):
                     if detected_name:
-                        new_row = pd.DataFrame([{
-                            "Date": str(input_date), 
-                            "SKU": input_sku, 
-                            "Name": detected_name, 
-                            "Quantity": qty, 
-                            "User": st.session_state['username']
-                        }])
-                        updated_df = pd.concat([existing_data, new_row], ignore_index=True)
-                        conn.update(data=updated_df)
-                        st.success(f"Saved: {detected_name}")
-                        st.rerun()
+                        # Prepare Airtable payload
+                        payload = {
+                            "records": [{
+                                "fields": {
+                                    "Date": str(input_date),
+                                    "SKU": str(input_sku),
+                                    "Name": str(detected_name),
+                                    "Quantity": int(qty),
+                                    "User": str(st.session_state['username'])
+                                }
+                            }]
+                        }
+                        
+                        response = requests.post(AIRTABLE_URL, headers=HEADERS, json=payload)
+                        
+                        if response.status_code == 200:
+                            st.success(f"Successfully saved to Cloud: {detected_name}")
+                            st.rerun()
+                        else:
+                            st.error(f"Sync Failed: {response.text}")
                     else:
                         st.error("Please enter a valid SKU first.")
 
+            # Display cloud history
+            st.divider()
+            st.subheader("Recent Cloud History")
             st.dataframe(existing_data.iloc[::-1], use_container_width=True)
 
         with t2:
@@ -149,13 +190,9 @@ elif st.session_state["authentication_status"]:
         with t3:
             st.subheader("🚚 Recommended Stock Transfers (Haiti -> PV)")
             if haiti_active:
-                # REINSTATED THE TRIPLE LOGIC
                 def calculate_request(row):
-                    # Rule 1: PV is out, Haiti has plenty
                     if row['Stock_pv'] == 0 and row['Stock_haiti'] > 20: return 10
-                    # Rule 2: PV is low (under 20) and sold 10+ last week
                     if row['Sold'] >= 10 and row['Stock_pv'] <= 20 and row['Stock_haiti'] > 20: return 25
-                    # Rule 3: Haiti is overstocked (75+) and PV is low-ish (35-)
                     if row['Stock_haiti'] > 75 and row['Stock_pv'] <= 35: return 15
                     return 0
                 
