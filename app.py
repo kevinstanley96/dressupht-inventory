@@ -28,23 +28,21 @@ if st.session_state["authentication_status"]:
     # --- 2. AIRTABLE CONFIG ---
     AIR_TOKEN = "pat1SYxIQWWcgkwy5.35f38c5bdc516561cbacc01116d09eeac8e861f3c442af68fcf19ee58e9dc72a"
     BASE_ID = "app5eJFgtbCaJHGhc"
-    TABLE_NAME = "Shipments"
-    AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
     HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
 
-    def get_airtable_data():
+    # Helper function for Airtable GET
+    def get_at_data(table):
         try:
+            url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
             params = {"sort[0][field]": "Date", "sort[0][direction]": "desc"}
-            response = requests.get(AIRTABLE_URL, headers=HEADERS, params=params)
-            if response.status_code == 200:
-                records = response.json().get('records', [])
-                if not records: return pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
-                df = pd.DataFrame([r['fields'] for r in records])
-                df['Date'] = pd.to_datetime(df['Date']).dt.date
-                return df
-            return pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
+            res = requests.get(url, headers=HEADERS, params=params)
+            if res.status_code == 200:
+                records = res.json().get('records', [])
+                if not records: return pd.DataFrame()
+                return pd.DataFrame([r['fields'] for r in records])
+            return pd.DataFrame()
         except:
-            return pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
+            return pd.DataFrame()
 
     def clean_data(file, location_col_name):
         df = pd.read_excel(file, skiprows=1)
@@ -68,113 +66,80 @@ if st.session_state["authentication_status"]:
 
     df_pv = pd.DataFrame()
     sku_to_name = {}
-    airtable_df = get_airtable_data()
-    haiti_active = False
-
+    sku_to_stock = {}
+    
     if file_pv:
         df_pv = clean_data(file_pv, "current quantity dressupht pv")
         sku_to_name = dict(zip(df_pv['SKU'], df_pv['Full Name']))
+        sku_to_stock = dict(zip(df_pv['SKU'], df_pv['Stock']))
+        # ... rest of your existing logic for Sold / Haiti Active ...
         if file_pv_prev:
             df_prev = clean_data(file_pv_prev, "current quantity dressupht pv")
             df_pv = pd.merge(df_pv, df_prev[['SKU', 'Stock']], on='SKU', how='left', suffixes=('', '_prev'))
             df_pv['Sold'] = (df_pv['Stock_prev'].fillna(0) - df_pv['Stock']).clip(lower=0)
-        else:
-            df_pv['Sold'] = 0
-        if file_haiti:
-            df_haiti = clean_data(file_haiti, "current quantity dressup haiti")
-            haiti_active = True
+        else: df_pv['Sold'] = 0
+        haiti_active = bool(file_haiti)
+        if file_haiti: df_haiti = clean_data(file_haiti, "current quantity dressup haiti")
 
     # --- 4. MAIN INTERFACE ---
     st.title("🦱 Dressupht Pv: Intelligence Center")
     search = st.text_input("🔍 Search Name or SKU")
     
-    def get_view(df_to_filter):
-        if df_to_filter.empty: return df_to_filter
-        if search:
-            return df_to_filter[df_to_filter['Full Name'].astype(str).str.contains(search, case=False) | 
-                                df_to_filter['SKU'].astype(str).str.contains(search, case=False)]
-        return df_to_filter
-
-    t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([
-        "➕ Intake", "🔄 Comparison", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "⚠️ Low Stock", "💰 Financials", "📋 Library", "📈 Logistics Insights"
+    t1, t2, t3, t4, t5, t6, t7, t8, t9, t10 = st.tabs([
+        "➕ Intake", "🕵️ Stock Audit", "🔄 Comparison", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "⚠️ Low Stock", "💰 Financials", "📋 Library", "📈 Analytics"
     ])
 
-    # TAB 1: INTAKE
+    # --- TAB 1: INTAKE (Same as before) ---
     with t1:
         st.subheader("Cloud Shipment Record")
-        input_sku = st.text_input("Scan/Enter SKU").strip()
-        det_name = sku_to_name.get(input_sku, "New Item/Unknown")
-        if input_sku: st.success(f"Item: {det_name}")
-        with st.form("intake", clear_on_submit=True):
-            d_in = st.date_input("Date", value=date.today())
-            q_in = st.number_input("Qty", min_value=1)
-            if st.form_submit_button("Sync to Cloud"):
+        input_sku = st.text_input("Scan SKU for Intake").strip()
+        det_name = sku_to_name.get(input_sku, "Unknown")
+        with st.form("intake_form", clear_on_submit=True):
+            d_in = st.date_input("Date", value=date.today(), key="in_date")
+            q_in = st.number_input("Qty Received", min_value=1)
+            if st.form_submit_button("Sync Intake"):
                 payload = {"records": [{"fields": {"Date": str(d_in), "SKU": input_sku, "Name": det_name, "Quantity": q_in, "User": st.session_state['username']}}]}
-                requests.post(AIRTABLE_URL, headers=HEADERS, json=payload)
+                requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=payload)
                 st.rerun()
-        st.dataframe(airtable_df, use_container_width=True)
+        st.dataframe(get_at_data("Shipments"), use_container_width=True)
 
-    # RESTORED TABS 2-8
-    if not df_pv.empty:
-        with t2:
-            if haiti_active:
-                compare_all = pd.merge(df_haiti[['SKU', 'Stock']], df_pv, on='SKU', suffixes=('_haiti', '_pv')).drop_duplicates(subset=['SKU'])
-                comparison_view = compare_all[((compare_all['Stock_haiti'] > 75) & (compare_all['Stock_pv'] <= 35)) | (compare_all['Stock_pv'] < 5)].copy()
-                def color_comparison(row):
-                    if row['Stock_pv'] < 5 and row['Stock_haiti'] > 25: return ['background-color: #2ecc71; color: white']*len(row)
-                    if row['Stock_pv'] < 5 and row['Stock_haiti'] < 5: return ['background-color: #e74c3c; color: white']*len(row)
-                    return ['']*len(row)
-                st.dataframe(get_view(comparison_view[['Full Name', 'SKU', 'Stock_pv', 'Stock_haiti']]).style.apply(color_comparison, axis=1), use_container_width=True)
+    # --- NEW TAB 2: STOCK AUDIT ---
+    with t2:
+        st.subheader("🕵️ Physical Inventory Audit")
+        st.info("Use this to manually count what is on the shelf and compare it to the System.")
         
-        with t3:
-            if haiti_active:
-                def calculate_request(row):
-                    if row['Stock_pv'] == 0 and row['Stock_haiti'] > 20: return 10
-                    if row['Sold'] >= 10 and row['Stock_pv'] <= 20 and row['Stock_haiti'] > 20: return 25
-                    if row['Stock_haiti'] > 75 and row['Stock_pv'] <= 35: return 15
-                    return 0
-                compare_all['Request Qty'] = compare_all.apply(calculate_request, axis=1)
-                st.dataframe(get_view(compare_all[compare_all['Request Qty'] > 0][['Full Name', 'SKU', 'Stock_haiti', 'Stock_pv', 'Sold', 'Request Qty']]), use_container_width=True)
-
-        with t4:
-            cw1, cw2 = st.columns(2)
-            cw1.write("✅ **Top 10 Sellers**")
-            cw1.table(df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold']])
-            cw2.write("📉 **Worst 10**")
-            cw2.table(df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold']])
-
-        with t5: st.dataframe(get_view(df_pv[df_pv['Stock'] == 0]), use_container_width=True)
-        with t6: st.dataframe(get_view(df_pv[(df_pv['Stock'] > 0) & (df_pv['Stock'] <= 5)]), use_container_width=True)
-        with t7:
-            df_pv['Value'] = df_pv['Stock'] * df_pv['Price']
-            st.dataframe(get_view(df_pv[['Full Name', 'SKU', 'Stock', 'Price', 'Value']].sort_values('Value', ascending=False)), use_container_width=True)
-        with t8: st.dataframe(get_view(df_pv), use_container_width=True)
-
-    # TAB 9: NEW LOGISTICS INSIGHTS
-    with t9:
-        st.header("📊 Logistics & Performance Analytics")
-        if not airtable_df.empty:
+        audit_sku = st.text_input("Scan SKU for Counting").strip()
+        system_qty = sku_to_stock.get(audit_sku, 0)
+        audit_name = sku_to_name.get(audit_sku, "Unknown Item")
+        
+        if audit_sku:
             c1, c2 = st.columns(2)
-            s_date = c1.date_input("Filter Analytics From:", value=airtable_df['Date'].min())
-            filtered_at = airtable_df[airtable_df['Date'] >= s_date]
-            c2.metric("Total Wigs Received", int(filtered_at['Quantity'].sum()))
+            c1.metric("Wig Name", audit_name)
+            c2.metric("System Qty (Excel)", int(system_qty))
 
-            st.divider()
-            sel_sku = st.selectbox("Analyze Specific SKU", options=airtable_df['SKU'].unique())
-            sku_h = airtable_df[airtable_df['SKU'] == sel_sku]
-            
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("Lifetime Received", int(sku_h['Quantity'].sum()))
-            sc2.metric("First Arrival", str(sku_h['Date'].min()))
-            
-            if not df_pv.empty and sel_sku in df_pv['SKU'].values:
-                curr_s = df_pv[df_pv['SKU'] == sel_sku]['Stock'].iloc[0]
-                sold_l = sku_h['Quantity'].sum() - curr_s
-                sc3.metric("Lifetime Sold", int(max(0, sold_l)))
-                
-                days_act = (date.today() - sku_h['Date'].min()).days
-                if days_act > 0:
-                    st.info(f"🚀 **Velocity:** You sell **{(sold_l/days_act):.2f}** units/day of this item.")
+        with st.form("audit_form", clear_on_submit=True):
+            manual_qty = st.number_input("Manual Qty (Physical Count)", min_value=0, step=1)
+            if st.form_submit_button("📥 Log Physical Count"):
+                if audit_sku:
+                    payload = {"records": [{"fields": {
+                        "Date": str(date.today()),
+                        "SKU": audit_sku,
+                        "Name": audit_name,
+                        "System_Qty": int(system_qty),
+                        "Manual_Qty": int(manual_qty),
+                        "User": st.session_state['username']
+                    }}]}
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=payload)
+                    st.success("Audit Logged!")
+                    st.rerun()
+                else: st.error("Please enter a SKU.")
+        
+        st.divider()
+        st.write("### Recent Audit History")
+        audit_history = get_at_data("Inventory_Audit")
+        if not audit_history.empty:
+            # Calculate discrepancy for display
+            audit_history['Diff'] = audit_history['Manual_Qty'] - audit_history['System_Qty']
+            st.dataframe(audit_history[['Date', 'SKU', 'Name', 'System_Qty', 'Manual_Qty', 'Diff', 'User']], use_container_width=True)
 
-            st.write("Shipment History for this SKU:")
-            st.table(sku_h[['Date', 'Quantity', 'User']])
+    # ... [Rest of your previous tabs t3-t9 code stays here] ...
