@@ -11,10 +11,14 @@ from yaml.loader import SafeLoader
 config = {
     'credentials': {
         'usernames': {
-            'admin': {
+            'kevin': {
                 'name': 'Dressup Haiti Admin',
-                'password': 'wigmaster123' # This will be hashed automatically
+                'password': 'The$100$Raven' # This will be hashed automatically
             }
+            'staff1': {
+        'name': 'Inventory Manager',
+        'password': 'secretpassword456'
+    }
         }
     },
     'cookie': {
@@ -116,3 +120,4 @@ elif st.session_state["authentication_status"]:
             st.dataframe(log_df.iloc[::-1], use_container_width=True)
     else:
         st.info("Please upload the PV file to start.")
+
