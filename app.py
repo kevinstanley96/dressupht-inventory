@@ -3,35 +3,53 @@ import pandas as pd
 import streamlit_authenticator as stauth
 import os
 from datetime import date
+import yaml
+from yaml.loader import SafeLoader
 
 # --- 1. USER AUTHENTICATION SETUP ---
-# You can add more users here
-names = ["Dressup Haiti User"]
-usernames = ["admin"]
-passwords = ["wigmaster123"] # Change this to your preferred password
+# We define the users in a dictionary format the new library requires
+config = {
+    'credentials': {
+        'usernames': {
+            'admin': {
+                'name': 'Dressup Haiti Admin',
+                'password': 'wigmaster123' # This will be hashed automatically
+            }
+        }
+    },
+    'cookie': {
+        'expiry_days': 30,
+        'key': 'inventory_signature_key',
+        'name': 'inventory_cookie'
+    }
+}
 
-# Hash the password (standard security)
-hashed_passwords = stauth.Hasher(passwords).generate()
-
+# This part converts the plain text password into a secure hash
 authenticator = stauth.Authenticate(
-    names, usernames, hashed_passwords,
-    "inventory_cookie", "signature_key", cookie_expiry_days=30
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days']
 )
 
-name, authentication_status, username = authenticator.login("Login", "main")
+# Render the login widget
+# Note: The new version returns a dictionary
+login_data = authenticator.login()
 
-if authentication_status == False:
+# Check authentication status
+if st.session_state["authentication_status"] == False:
     st.error("Username/password is incorrect")
-elif authentication_status == None:
+elif st.session_state["authentication_status"] == None:
     st.warning("Please enter your username and password")
-elif authentication_status:
+elif st.session_state["authentication_status"]:
+    
     # --- EVERYTHING BELOW RUNS ONLY AFTER LOGIN ---
-    authenticator.logout("Logout", "sidebar")
-    st.sidebar.title(f"Welcome {name}")
+    authenticator.logout('Logout', 'sidebar')
+    st.sidebar.title(f"Welcome {st.session_state['name']}")
 
-    # --- FILE SETUP ---
+    # --- 2. FILE SETUP ---
     LOG_FILE = "wig_intake_log.csv"
-    EXPECTED_COLS = ["Date", "SKU", "Name", "Quantity", "User"] # Added 'User' column
+    EXPECTED_COLS = ["Date", "SKU", "Name", "Quantity", "User"]
 
     if not os.path.exists(LOG_FILE):
         pd.DataFrame(columns=EXPECTED_COLS).to_csv(LOG_FILE, index=False)
@@ -53,10 +71,9 @@ elif authentication_status:
         df['Full Name'] = df['Wig Name'] + " (" + df['Style'].fillna('') + ")"
         return df
 
-    # --- APP LOGIC ---
+    # --- 3. MAIN APP LOGIC ---
     st.title("🦱 Dressupht Pv: Secure Inventory")
 
-    # [UPLOADS SECTION - Same as before]
     col_u1, col_u2, col_u3 = st.columns(3)
     file_pv = col_u1.file_uploader("📍 THIS Saturday (PV)", type=['xlsx'])
     file_pv_prev = col_u2.file_uploader("🕒 LAST Saturday (PV)", type=['xlsx'])
@@ -80,16 +97,22 @@ elif authentication_status:
                 qty = st.number_input("Quantity", min_value=1)
                 if st.form_submit_button("✅ Save Entry"):
                     if detected_name:
-                        # We save the 'username' so we know who entered it
-                        new_entry = pd.DataFrame([[str(date.today()), input_sku, detected_name, qty, username]], columns=EXPECTED_COLS)
+                        # Save the entry with the logged-in username
+                        new_entry = pd.DataFrame([[
+                            str(date.today()), 
+                            input_sku, 
+                            detected_name, 
+                            qty, 
+                            st.session_state['username']
+                        ]], columns=EXPECTED_COLS)
+                        
                         new_entry.to_csv(LOG_FILE, mode='a', header=False, index=False)
+                        st.success("Entry saved!")
                         st.rerun()
 
             st.divider()
             st.subheader("History")
             log_df = pd.read_csv(LOG_FILE)
-            # Filter history so a user only sees their own entries (or show all for admin)
             st.dataframe(log_df.iloc[::-1], use_container_width=True)
-
     else:
-        st.info("Upload PV file to begin.")
+        st.info("Please upload the PV file to start.")
