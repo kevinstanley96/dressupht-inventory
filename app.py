@@ -112,7 +112,7 @@ if st.session_state["authentication_status"]:
         st.subheader("🕵️ Physical Inventory Audit")
         
         # Staff List for Inventory Day
-        staff_members = ["Select Counter...", "Jean", "Marie", "Widline", "Peterson", "Esther", "Kevin"]
+        staff_members = ["Select Counter...", "Angelina", "Gerdine", "Annaelle", "David", "Kevin"]
         selected_staff = st.selectbox("Who is counting?", options=staff_members)
         
         a_sku = st.text_input("Scan SKU for Audit", key="audit_scan").strip()
@@ -184,3 +184,4 @@ if st.session_state["authentication_status"]:
                 st.metric("Total Units Received", int(sh['Quantity'].sum()))
                 st.table(sh[['Date', 'Quantity', 'User']])
     else: st.info("Upload PV file in sidebar to see full performance data.")
+
