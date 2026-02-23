@@ -34,6 +34,7 @@ if st.session_state["authentication_status"]:
         try:
             url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
             params = {"sort[0][field]": "Date", "sort[0][direction]": "desc"}
+            # Note: We use a larger page size or handle pagination if history gets very long
             res = requests.get(url, headers=HEADERS, params=params)
             if res.status_code == 200:
                 records = res.json().get('records', [])
@@ -109,18 +110,40 @@ if st.session_state["authentication_status"]:
 
     with tabs[1]: # AUDIT
         st.subheader("🕵️ Physical Inventory Audit")
+        
+        # Staff List for Inventory Day
+        staff_members = ["Select Counter...", "Jean", "Marie", "Widline", "Peterson", "Esther", "Kevin"]
+        selected_staff = st.selectbox("Who is counting?", options=staff_members)
+        
         a_sku = st.text_input("Scan SKU for Audit", key="audit_scan").strip()
         s_qty = sku_to_stock.get(a_sku, 0)
         a_name = sku_to_name.get(a_sku, "Unknown Item")
+        
         if a_sku:
             c1, c2 = st.columns(2)
-            c1.metric("Wig Name", a_name); c2.metric("System Qty", int(s_qty))
+            c1.metric("Wig Name", a_name)
+            c2.metric("System Qty", int(s_qty))
+            
         with st.form("aud_form", clear_on_submit=True):
-            m_qty = st.number_input("Manual Qty (On Shelf)", min_value=0)
+            m_qty = st.number_input("Manual Qty (On Shelf)", min_value=0, step=1)
             if st.form_submit_button("Log Audit"):
-                p = {"records": [{"fields": {"Date": str(date.today()), "SKU": a_sku, "Name": a_name, "System_Qty": int(s_qty), "Manual_Qty": int(m_qty), "User": st.session_state['username']}}]}
-                requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=p)
-                st.rerun()
+                if a_sku and selected_staff != "Select Counter...":
+                    p = {"records": [{"fields": {
+                        "Date": str(date.today()), 
+                        "SKU": a_sku, 
+                        "Name": a_name, 
+                        "System_Qty": int(s_qty), 
+                        "Manual_Qty": int(m_qty), 
+                        "User": selected_staff
+                    }}]}
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=p)
+                    st.success(f"Audit saved for {selected_staff}")
+                    st.rerun()
+                elif selected_staff == "Select Counter...":
+                    st.error("Please select who did the count.")
+                else:
+                    st.error("Scan a SKU first.")
+                    
         aud_hist = get_at_data("Inventory_Audit")
         if not aud_hist.empty:
             aud_hist['Diff'] = aud_hist['Manual_Qty'] - aud_hist['System_Qty']
@@ -142,7 +165,9 @@ if st.session_state["authentication_status"]:
                 st.dataframe(get_view(comp[comp['Request'] > 0][['Full Name', 'SKU', 'Stock_haiti', 'Stock_pv', 'Sold', 'Request']]), use_container_width=True)
         with tabs[4]: # FAST/SLOW
             cw1, cw2 = st.columns(2)
+            cw1.write("Top 10 Sellers")
             cw1.table(df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold']])
+            cw2.write("Bottom 10 (Dead Stock)")
             cw2.table(df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold']])
         with tabs[5]: st.dataframe(get_view(df_pv[df_pv['Stock'] == 0]), use_container_width=True) # OOS
         with tabs[6]: st.dataframe(get_view(df_pv[(df_pv['Stock'] > 0) & (df_pv['Stock'] <= 5)]), use_container_width=True) # LOW
@@ -154,8 +179,8 @@ if st.session_state["authentication_status"]:
             st.subheader("📈 Shipment Velocity")
             at_df = get_at_data("Shipments")
             if not at_df.empty:
-                sel_s = st.selectbox("Pick SKU", at_df['SKU'].unique())
+                sel_s = st.selectbox("Pick SKU to view history", at_df['SKU'].unique())
                 sh = at_df[at_df['SKU'] == sel_s]
-                st.metric("Total Received", int(sh['Quantity'].sum()))
+                st.metric("Total Units Received", int(sh['Quantity'].sum()))
                 st.table(sh[['Date', 'Quantity', 'User']])
-    else: st.info("Upload PV file in sidebar to see full data.")
+    else: st.info("Upload PV file in sidebar to see full performance data.")
