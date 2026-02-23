@@ -67,7 +67,7 @@ elif st.session_state["authentication_status"]:
         return df
 
     # --- 3. MAIN APP ---
-    st.title("🦱 Dressupht Pv: Full Intelligence Center")
+    st.title("🦱 Dressupht Pv: Intelligence Center")
 
     col_u1, col_u2, col_u3 = st.columns(3)
     file_pv = col_u1.file_uploader("📍 THIS Saturday (PV)", type=['xlsx'])
@@ -114,7 +114,6 @@ elif st.session_state["authentication_status"]:
                 existing_data = pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
 
             with st.form("intake_form", clear_on_submit=True):
-                # RESTORED DATE AND QUANTITY INPUTS
                 col_f1, col_f2 = st.columns(2)
                 input_date = col_f1.date_input("Date Received", value=date.today())
                 qty = col_f2.number_input("Quantity Received", min_value=1)
@@ -122,7 +121,7 @@ elif st.session_state["authentication_status"]:
                 if st.form_submit_button("✅ Sync to Cloud"):
                     if detected_name:
                         new_row = pd.DataFrame([{
-                            "Date": str(input_date), # Using the user-selected date
+                            "Date": str(input_date), 
                             "SKU": input_sku, 
                             "Name": detected_name, 
                             "Quantity": qty, 
@@ -147,22 +146,31 @@ elif st.session_state["authentication_status"]:
                     return ['']*len(row)
                 st.dataframe(get_view(comparison_view[['Full Name', 'SKU', 'Stock_pv', 'Stock_haiti']]).style.apply(color_comparison, axis=1), use_container_width=True)
 
-        # ... [Rest of the tabs t3-t8 logic remains exactly as before] ...
         with t3:
+            st.subheader("🚚 Recommended Stock Transfers (Haiti -> PV)")
             if haiti_active:
+                # REINSTATED THE TRIPLE LOGIC
                 def calculate_request(row):
-                    if row['Stock_pv'] == 0 and row['Stock_haiti'] > 20: return 5
+                    # Rule 1: PV is out, Haiti has plenty
+                    if row['Stock_pv'] == 0 and row['Stock_haiti'] > 20: return 10
+                    # Rule 2: PV is low (under 20) and sold 10+ last week
                     if row['Sold'] >= 10 and row['Stock_pv'] <= 20 and row['Stock_haiti'] > 20: return 25
+                    # Rule 3: Haiti is overstocked (75+) and PV is low-ish (35-)
+                    if row['Stock_haiti'] > 75 and row['Stock_pv'] <= 35: return 15
                     return 0
+                
                 compare_all['Request Qty'] = compare_all.apply(calculate_request, axis=1)
-                st.dataframe(get_view(compare_all[compare_all['Request Qty'] > 0][['Full Name', 'SKU', 'Stock_haiti', 'Stock_pv', 'Sold', 'Request Qty']]), use_container_width=True)
+                transfers = compare_all[compare_all['Request Qty'] > 0]
+                st.dataframe(get_view(transfers[['Full Name', 'SKU', 'Stock_haiti', 'Stock_pv', 'Sold', 'Request Qty']]), use_container_width=True)
+            else:
+                st.warning("Please upload the Haiti file to see transfer recommendations.")
 
         with t4:
-            st.subheader("🏆 Performance Leaders")
+            st.subheader("🏆 Sales Performance")
             cw1, cw2 = st.columns(2)
-            cw1.write("Top 10 Selling Wigs")
+            cw1.write("✅ **Top 10 Sellers**")
             cw1.table(df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold']])
-            cw2.write("Worst 10 (Dead Stock)")
+            cw2.write("📉 **Worst 10 (Dead Stock)**")
             cw2.table(df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold']])
 
         with t5: st.dataframe(get_view(df_pv[df_pv['Stock'] == 0]), use_container_width=True)
