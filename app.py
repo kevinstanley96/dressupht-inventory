@@ -14,7 +14,7 @@ config = {
             'kevin': {
                 'name': 'Dressup Haiti Admin',
                 'password': 'The$100$Raven' # This will be hashed automatically
-            }
+            },
             'staff1': {
         'name': 'Inventory Manager',
         'password': 'secretpassword456'
@@ -120,4 +120,5 @@ elif st.session_state["authentication_status"]:
             st.dataframe(log_df.iloc[::-1], use_container_width=True)
     else:
         st.info("Please upload the PV file to start.")
+
 
