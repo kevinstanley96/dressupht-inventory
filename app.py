@@ -55,7 +55,7 @@ elif st.session_state["authentication_status"]:
             'sku': 'SKU', 'price': 'Price', 'categories': 'Category',
             location_col_name.lower(): 'Stock'
         }
-        existing = [c for c in needed.keys() if c in df.columns]
+        existing = [c for c in list(df.columns) if c in needed.keys()]
         df = df[existing].copy()
         df.columns = [needed[c] for c in existing]
         if 'Category' not in df.columns: df['Category'] = 'Uncategorized'
@@ -78,7 +78,6 @@ elif st.session_state["authentication_status"]:
         df_pv = clean_data(file_pv, "current quantity dressupht pv")
         sku_to_name = dict(zip(df_pv['SKU'], df_pv['Full Name']))
 
-        # Sales Calculations
         if file_pv_prev:
             df_prev = clean_data(file_pv_prev, "current quantity dressupht pv")
             df_pv = pd.merge(df_pv, df_prev[['SKU', 'Stock']], on='SKU', how='left', suffixes=('', '_prev'))
@@ -98,7 +97,6 @@ elif st.session_state["authentication_status"]:
                                     df_to_filter['SKU'].astype(str).str.contains(search, case=False)]
             return df_to_filter
 
-        # --- THE TABS (ALL LOGIC REINSTATED) ---
         t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs([
             "➕ Shipment Intake", "🔄 Comparison", "🚚 Smart Transfers", "🔥 Fast/Slow", 
             "❌ OOS", "⚠️ Low Stock", "💰 Financials", "📋 Full Library"
@@ -116,14 +114,26 @@ elif st.session_state["authentication_status"]:
                 existing_data = pd.DataFrame(columns=["Date", "SKU", "Name", "Quantity", "User"])
 
             with st.form("intake_form", clear_on_submit=True):
-                qty = st.number_input("Quantity Received", min_value=1)
+                # RESTORED DATE AND QUANTITY INPUTS
+                col_f1, col_f2 = st.columns(2)
+                input_date = col_f1.date_input("Date Received", value=date.today())
+                qty = col_f2.number_input("Quantity Received", min_value=1)
+                
                 if st.form_submit_button("✅ Sync to Cloud"):
                     if detected_name:
-                        new_row = pd.DataFrame([{"Date": str(date.today()), "SKU": input_sku, "Name": detected_name, "Quantity": qty, "User": st.session_state['username']}])
+                        new_row = pd.DataFrame([{
+                            "Date": str(input_date), # Using the user-selected date
+                            "SKU": input_sku, 
+                            "Name": detected_name, 
+                            "Quantity": qty, 
+                            "User": st.session_state['username']
+                        }])
                         updated_df = pd.concat([existing_data, new_row], ignore_index=True)
                         conn.update(data=updated_df)
-                        st.success("Synced!")
+                        st.success(f"Saved: {detected_name}")
                         st.rerun()
+                    else:
+                        st.error("Please enter a valid SKU first.")
 
             st.dataframe(existing_data.iloc[::-1], use_container_width=True)
 
@@ -137,6 +147,7 @@ elif st.session_state["authentication_status"]:
                     return ['']*len(row)
                 st.dataframe(get_view(comparison_view[['Full Name', 'SKU', 'Stock_pv', 'Stock_haiti']]).style.apply(color_comparison, axis=1), use_container_width=True)
 
+        # ... [Rest of the tabs t3-t8 logic remains exactly as before] ...
         with t3:
             if haiti_active:
                 def calculate_request(row):
