@@ -12,27 +12,35 @@ if not os.path.exists(LOG_FILE):
     pd.DataFrame(columns=["Date", "SKU", "Quantity"]).to_csv(LOG_FILE, index=False)
 
 def clean_data(file, location_col_name):
+    # Square files often have a header row we need to skip
     df = pd.read_excel(file, skiprows=1)
     df.columns = [str(c).strip().lower() for c in df.columns]
     
-    # Updated mapping to include 'Category'
+    # Mapping for Square's specific column names
     needed = {
         'item name': 'Wig Name', 
         'variation name': 'Style', 
         'sku': 'SKU', 
         'price': 'Price', 
-        'category': 'Category',
+        'categories': 'Category',  # Updated to plural 'categories'
         location_col_name.lower(): 'Stock'
     }
     
+    # Check which columns exist
     existing = [c for c in needed.keys() if c in df.columns]
     df = df[existing].copy()
     df.columns = [needed[c] for c in existing]
     
+    # Safety check for Categories
+    if 'Category' not in df.columns:
+        df['Category'] = 'Uncategorized'
+    else:
+        df['Category'] = df['Category'].fillna('Uncategorized')
+    
+    # Standard Cleaning
     df = df.dropna(subset=['SKU'])
     df['SKU'] = df['SKU'].astype(str).str.strip()
     df['Full Name'] = df['Wig Name'] + " (" + df['Style'].fillna('') + ")"
-    df['Category'] = df['Category'].fillna('Uncategorized')
     
     df['Stock'] = pd.to_numeric(df['Stock'], errors='coerce').fillna(0)
     df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
@@ -90,6 +98,7 @@ if file_pv:
     ])
 
     with t1:
+        st.subheader("PV vs Haiti Visual Comparison")
         if haiti_active:
             compare_all = pd.merge(df_haiti[['SKU', 'Stock']], df_pv, on='SKU', suffixes=('_haiti', '_pv')).drop_duplicates(subset=['SKU'])
             comparison_view = compare_all[((compare_all['Stock_haiti'] > 75) & (compare_all['Stock_pv'] <= 35)) | (compare_all['Stock_pv'] < 5)].copy()
@@ -112,36 +121,25 @@ if file_pv:
 
     with t3:
         st.subheader("🏆 Sales Performance (Weekly)")
-        
-        # --- WIG PERFORMANCE ---
         col_w1, col_w2 = st.columns(2)
         with col_w1:
             st.write("✅ **Top 10 Selling Wigs**")
-            top_10_wigs = df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold', 'Stock']]
-            st.table(top_10_wigs)
-        
+            st.table(df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold', 'Stock']])
         with col_w2:
             st.write("❌ **Worst 10 Selling Wigs (Dead Stock)**")
-            # We filter for items with stock > 0 so we don't just see OOS items
-            worst_10_wigs = df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold', 'Stock']]
-            st.table(worst_10_wigs)
-
+            st.table(df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold', 'Stock']])
+        
         st.divider()
-
-        # --- CATEGORY PERFORMANCE ---
         st.subheader("📁 Category Insights")
         cat_perf = df_pv.groupby('Category')['Sold'].sum().reset_index()
-        
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.write("🌟 **Top 10 Categories**")
             st.table(cat_perf.nlargest(10, 'Sold'))
-        
         with col_c2:
             st.write("📉 **Worst 10 Categories**")
             st.table(cat_perf.nsmallest(10, 'Sold'))
 
-    # ... Remaining tabs (OOS, Low Stock, Financials, Library) ...
     with t4: st.dataframe(get_view(df_pv[df_pv['Stock'] == 0]), use_container_width=True)
     with t5: st.dataframe(get_view(df_pv[(df_pv['Stock'] > 0) & (df_pv['Stock'] <= 5)]), use_container_width=True)
     with t6:
