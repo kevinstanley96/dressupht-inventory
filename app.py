@@ -12,7 +12,7 @@ config = {
     'credentials': {
         'usernames': {
             'kevin': {'name': 'Dressup Haiti Admin', 'password': 'The$100$Raven'},
-            'staff1': {'name': 'Inventory Manager', 'password': 'secretpassword456'}
+            'david': {'name': 'Inventory Manager', 'password': 'Dressuphaiti2026'}
         }
     },
     'cookie': {'expiry_days': 30, 'key': 'inventory_signature_key', 'name': 'inventory_cookie'}
@@ -217,3 +217,4 @@ if st.session_state["authentication_status"]:
                 st.table(sh[['Date', 'Quantity', 'User']])
     else:
         st.info("Upload PV Inventory file in the sidebar to unlock performance tabs.")
+
