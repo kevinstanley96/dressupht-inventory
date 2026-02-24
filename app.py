@@ -18,7 +18,6 @@ st.markdown("""
         font-weight: bold;
         width: 100%;
     }
-    /* Hide the row numbers globally for a cleaner look */
     [data-testid="stElementToolbar"] { display: none; }
     </style>
     """, unsafe_allow_html=True)
@@ -35,14 +34,23 @@ config = {
     'cookie': {'expiry_days': 30, 'key': 'inventory_signature_key', 'name': 'inventory_cookie'}
 }
 
-authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
+authenticator = stauth.Authenticate(
+    config['credentials'], 
+    config['cookie']['name'], 
+    config['cookie']['key'], 
+    config['cookie']['expiry_days']
+)
+
 authenticator.login()
 
 # --- HELPER FUNCTIONS ---
 def get_at_data(table, base_id, headers):
     try:
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
-        res = requests.get(url, headers=headers)
+        # Alphabetical sorting for Guest view
+        params = {"sort[0][field]": "Full Name", "sort[0][direction]": "asc"}
+        res = requests.get(url, headers=headers, params=params)
+        
         if res.status_code == 200:
             records = res.json().get('records', [])
             if not records: return pd.DataFrame()
@@ -63,16 +71,28 @@ def get_at_data(table, base_id, headers):
 def clean_data(file, loc_col):
     df = pd.read_excel(file, skiprows=1)
     df.columns = [str(c).strip().lower() for c in df.columns]
+    
     needed = {'item name': 'Wig Name', 'variation name': 'Style', 'sku': 'SKU', 'price': 'Price', 'categories': 'Category', loc_col.lower(): 'Stock'}
     existing = [c for c in list(df.columns) if c in needed.keys()]
     df = df[existing].copy()
     df.columns = [needed[c] for c in existing]
+
+    # --- ENCODING FIX FOR SYMBOLS (â€ -> ”) ---
+    for col in ['Wig Name', 'Style']:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+            # Hard replacements for common Square/Excel export errors
+            df[col] = df[col].str.replace('â€', '”', regex=False)
+            df[col] = df[col].str.replace('â€™', "'", regex=False)
+            df[col] = df[col].str.replace('â€œ', '“', regex=False)
+
     if 'Category' not in df.columns: df['Category'] = "Uncategorized"
     df['SKU'] = df['SKU'].astype(str).str.strip()
     df['Full Name'] = df['Wig Name'] + " (" + df['Style'].fillna('') + ")"
     df['Stock'] = pd.to_numeric(df['Stock'], errors='coerce').fillna(0)
     df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
-    return df
+    
+    return df.sort_values('Full Name')
 
 # --- MAIN APP LOGIC ---
 if st.session_state["authentication_status"]:
@@ -80,14 +100,13 @@ if st.session_state["authentication_status"]:
     curr_user = st.session_state['username']
     
     try:
-        AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
-        BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
+        AIR_TOKEN = st.secrets["AIRTOKEN"] # Make sure these match your secrets exactly
+        BASE_ID = st.secrets["BASEID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
-        st.error("Check Streamlit Secrets for Airtable credentials.")
+        st.error("Secrets Error. Check AIRTOKEN and BASEID in Streamlit.")
         st.stop()
 
-    # --- SIDEBAR & UPLOADS ---
     df_pv = pd.DataFrame()
     haiti_active = sales_ready = False
 
@@ -115,7 +134,7 @@ if st.session_state["authentication_status"]:
         if f_quick:
             df_quick = clean_data(f_quick, "current quantity dressupht pv")
             if st.sidebar.button("🚀 Push to Guest Library"):
-                with st.spinner("Updating Cloud..."):
+                with st.spinner("Clearing & Syncing..."):
                     old = get_at_data("Master_Inventory", BASE_ID, HEADERS)
                     if not old.empty:
                         ids = old['id'].tolist()
@@ -129,29 +148,24 @@ if st.session_state["authentication_status"]:
                     time.sleep(1)
                     st.rerun()
 
-    # --- HEADER & SEARCH ---
     st.title("🦱 Dressupht Intelligence")
     search = st.text_input("🔍 Search Inventory", placeholder="Search style name...")
 
-    # --- ROLE-BASED TABS ---
     if curr_user == 'guest':
         tabs = st.tabs(["📋 Library"])
     else:
         tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📊 Sales", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "💰 Finance", "📋 Library", "📈 Analytics"])
 
-    # --- GUEST TAB LOGIC ---
+    # --- GUEST TAB ---
     if curr_user == 'guest':
         with tabs[0]:
             data = get_at_data("Master_Inventory", BASE_ID, HEADERS)
             if not data.empty:
-                # Optimized Column Selection for Guest
                 cols = [c for c in ['Full Name', 'Stock', 'Last Updated Display'] if c in data.columns]
                 display_df = data[cols].copy()
-                
                 if search:
                     display_df = display_df[display_df['Full Name'].str.contains(search, case=False)]
                 
-                # Mobile Optimized Dataframe
                 st.dataframe(
                     display_df,
                     use_container_width=True,
@@ -162,14 +176,12 @@ if st.session_state["authentication_status"]:
                         "Last Updated Display": st.column_config.TextColumn("Synced", width="small")
                     }
                 )
-                
-                # Download button for Excel/Mobile use
                 csv = display_df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download Inventory (Excel)", data=csv, file_name="inventory.csv", mime="text/csv")
+                st.download_button("📥 Download Inventory (CSV)", data=csv, file_name="inventory.csv", mime="text/csv")
             else:
-                st.warning("Inventory update in progress. Please wait.")
+                st.warning("Inventory update in progress.")
 
-    # --- ADMIN/STAFF TAB LOGIC ---
+    # --- ADMIN TABS ---
     else:
         with tabs[0]: # Intake
             i_sku = st.text_input("Scan for Intake").strip()
@@ -184,28 +196,25 @@ if st.session_state["authentication_status"]:
         with tabs[1]: # Audit
             a_sku = st.text_input("Scan for Audit").strip()
             with st.form("aud"):
-                m = st.number_input("Actual Qty Found", 0)
+                m = st.number_input("Actual Qty", 0)
                 if st.form_submit_button("Log Audit"):
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Manual_Qty": m, "User": curr_user}}]})
                     st.rerun()
-            aud = get_at_data("Inventory_Audit", BASE_ID, HEADERS)
-            if not aud.empty: st.dataframe(aud.drop(columns=['id']), use_container_width=True, hide_index=True)
 
         with tabs[2]: # Sales
-            if sales_ready:
-                st.dataframe(df_pv[df_pv['Sold'] > 0], use_container_width=True, hide_index=True)
-            else: st.info("Upload Saturday files to see sales.")
+            if sales_ready: st.dataframe(df_pv[df_pv['Sold'] > 0], use_container_width=True, hide_index=True)
+
+        with tabs[3]: # Compare
+            if haiti_active:
+                comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv, on='SKU', suffixes=('_haiti', '_pv'))
+                st.dataframe(comp, use_container_width=True, hide_index=True)
 
         with tabs[6]: # OOS
-            if not df_pv.empty:
-                st.dataframe(df_pv[df_pv['Stock'] == 0], use_container_width=True, hide_index=True)
+            if not df_pv.empty: st.dataframe(df_pv[df_pv['Stock'] == 0], use_container_width=True, hide_index=True)
 
         with tabs[8]: # Internal Library
-            st.subheader("Cloud Master Library")
             lib_data = get_at_data("Master_Inventory", BASE_ID, HEADERS)
-            if not lib_data.empty:
-                st.dataframe(lib_data.drop(columns=['id'], errors='ignore'), use_container_width=True, hide_index=True)
+            if not lib_data.empty: st.dataframe(lib_data.drop(columns=['id'], errors='ignore'), use_container_width=True, hide_index=True)
 
 elif st.session_state["authentication_status"] is False:
     st.error("Login failed.")
-
