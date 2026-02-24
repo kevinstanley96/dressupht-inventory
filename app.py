@@ -47,13 +47,11 @@ if st.session_state["authentication_status"]:
     def clean_data(file, loc_col):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip().lower() for c in df.columns]
-        # Using 'categories' as the source key for 'Category' as per your instructions
         needed = {'item name': 'Wig Name', 'variation name': 'Style', 'sku': 'SKU', 'price': 'Price', 'categories': 'Category', loc_col.lower(): 'Stock'}
         existing = [c for c in list(df.columns) if c in needed.keys()]
         df = df[existing].copy()
         df.columns = [needed[c] for c in existing]
         
-        # Ensure Category exists even if missing in Excel
         if 'Category' not in df.columns:
             df['Category'] = "Uncategorized"
         else:
@@ -71,18 +69,17 @@ if st.session_state["authentication_status"]:
     file_pv_prev = st.sidebar.file_uploader("🕒 LAST Saturday (PV)", type=['xlsx'])
     file_haiti = st.sidebar.file_uploader("🌐 Dressup Haiti", type=['xlsx'])
 
-    # DATA PROCESSING
     df_pv = pd.DataFrame()
     sku_to_name = {}
     sku_to_stock = {}
-    sku_to_cat = {} # New lookup dictionary
+    sku_to_cat = {} 
     haiti_active = False
 
     if file_pv:
         df_pv = clean_data(file_pv, "current quantity dressupht pv")
         sku_to_name = dict(zip(df_pv['SKU'], df_pv['Full Name']))
         sku_to_stock = dict(zip(df_pv['SKU'], df_pv['Stock']))
-        sku_to_cat = dict(zip(df_pv['SKU'], df_pv['Category'])) # Map SKU to Category
+        sku_to_cat = dict(zip(df_pv['SKU'], df_pv['Category'])) 
         
         if file_pv_prev:
             df_prev = clean_data(file_pv_prev, "current quantity dressupht pv")
@@ -93,7 +90,6 @@ if st.session_state["authentication_status"]:
             df_haiti = clean_data(file_haiti, "current quantity dressup haiti")
             haiti_active = True
 
-    # SEARCH
     st.title("🦱 Dressupht Pv: Intelligence Center")
     search = st.text_input("🔍 Search Name or SKU")
     def get_view(df_to_filter):
@@ -127,7 +123,7 @@ if st.session_state["authentication_status"]:
         a_sku = st.text_input("Scan SKU for Audit", key="audit_scan").strip()
         s_qty = sku_to_stock.get(a_sku, 0)
         a_name = sku_to_name.get(a_sku, "Unknown Item")
-        a_cat = sku_to_cat.get(a_sku, "Uncategorized") # Logic to default to Uncategorized
+        a_cat = sku_to_cat.get(a_sku, "Uncategorized") 
         
         if a_sku:
             c1, c2, c3 = st.columns(3)
@@ -136,16 +132,24 @@ if st.session_state["authentication_status"]:
             c3.metric("System Qty", int(s_qty))
             
         with st.form("aud_form", clear_on_submit=True):
-            m_qty = st.number_input("Manual Qty (On Shelf)", min_value=0, step=1)
+            col_m1, col_m2 = st.columns(2)
+            m_qty = col_m1.number_input("Manual Qty (In Depot/Warehouse)", min_value=0, step=1)
+            e_qty = col_m2.number_input("Mannequin (Exposed Qty)", min_value=0, step=1)
+            
+            # Show live total to the user before submitting
+            total_physical = m_qty + e_qty
+            st.info(f"Total Physical Count (Depot + Mannequin): **{total_physical}**")
+
             if st.form_submit_button("Log Audit"):
                 if a_sku and selected_staff != "Select Counter...":
                     p = {"records": [{"fields": {
                         "Date": str(date.today()), 
                         "SKU": a_sku, 
                         "Name": a_name, 
-                        "Category": a_cat, # Added Category to the send payload
+                        "Category": a_cat,
                         "System_Qty": int(s_qty), 
-                        "Manual_Qty": int(m_qty), 
+                        "Manual_Qty": int(m_qty),
+                        "Mannequin": int(e_qty), # New Column for Airtable
                         "User": selected_staff
                     }}]}
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=p)
@@ -156,24 +160,30 @@ if st.session_state["authentication_status"]:
                 else:
                     st.error("Scan a SKU first.")
                     
-        # --- AUDIT HISTORY AND SUMMARY SECTION ---
         aud_hist = get_at_data("Inventory_Audit")
         if not aud_hist.empty:
-            # 1. Metric Calculations
-            aud_hist['Diff'] = aud_hist['Manual_Qty'] - aud_hist['System_Qty']
+            # --- UPDATED LOGIC FOR CALCULATION ---
+            # Fill NaN for Mannequin in case old records don't have it
+            if 'Mannequin' not in aud_hist.columns:
+                aud_hist['Mannequin'] = 0
+            else:
+                aud_hist['Mannequin'] = aud_hist['Mannequin'].fillna(0)
+
+            # (Manual + Mannequin) - System = Difference
+            aud_hist['Diff'] = (aud_hist['Manual_Qty'] + aud_hist['Mannequin']) - aud_hist['System_Qty']
             
-            # 2. Daily Summary by Category (KeyError Safety Check)
             if 'Category' in aud_hist.columns:
                 st.write("#### Category Summary (Today)")
                 today_data = aud_hist[aud_hist['Date'] == date.today()]
                 if not today_data.empty:
-                    summary = today_data.groupby('Category').agg({'Manual_Qty':'sum', 'SKU':'count'})
-                    summary.columns = ['Total Units Counted', 'Unique Items']
+                    # Summary also includes Mannequin counts now
+                    summary = today_data.groupby('Category').agg({'Manual_Qty':'sum', 'Mannequin':'sum', 'SKU':'count'})
+                    summary['Total Physical'] = summary['Manual_Qty'] + summary['Mannequin']
+                    summary.columns = ['Depot Units', 'Mannequin Units', 'Unique Items', 'Total Units']
                     st.dataframe(summary, use_container_width=True)
             
             st.write("#### Detailed History")
-            # Dynamic column list to prevent errors if Category doesn't exist in old Airtable records
-            display_cols = ['Date', 'Category', 'SKU', 'Name', 'System_Qty', 'Manual_Qty', 'Diff', 'User']
+            display_cols = ['Date', 'Category', 'SKU', 'Name', 'System_Qty', 'Manual_Qty', 'Mannequin', 'Diff', 'User']
             existing_cols = [c for c in display_cols if c in aud_hist.columns]
             st.dataframe(aud_hist[existing_cols], use_container_width=True)
 
