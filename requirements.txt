@@ -4,3 +4,8 @@ pandas
 openpyxl
 streamlit-authenticator
 st-gsheets-connection
+streamlit
+pandas
+requests
+streamlit-authenticator
+openpyxl
