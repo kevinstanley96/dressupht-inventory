@@ -36,9 +36,10 @@ if st.session_state["authentication_status"]:
             params = {"sort[0][field]": "Date", "sort[0][direction]": "desc"}
             res = requests.get(url, headers=HEADERS, params=params)
             if res.status_code == 200:
-                records = res.json().get('records', [])
-                if not records: return pd.DataFrame()
-                df = pd.DataFrame([r['fields'] for r in records])
+                data = res.json().get('records', [])
+                if not data: return pd.DataFrame()
+                # Store Record ID for deletion purposes
+                df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in data])
                 if 'Date' in df.columns: df['Date'] = pd.to_datetime(df['Date']).dt.date
                 return df
             return pd.DataFrame()
@@ -136,24 +137,39 @@ if st.session_state["authentication_status"]:
             m_qty = col_m1.number_input("Manual Qty (In Depot/Warehouse)", min_value=0, step=1)
             e_qty = col_m2.number_input("Mannequin (Exposed Qty)", min_value=0, step=1)
             
-            # Show live total to the user before submitting
             total_physical = m_qty + e_qty
             st.info(f"Total Physical Count (Depot + Mannequin): **{total_physical}**")
 
             if st.form_submit_button("Log Audit"):
                 if a_sku and selected_staff != "Select Counter...":
-                    p = {"records": [{"fields": {
+                    # --- AUTO-REPLACE LOGIC (UPSERT) ---
+                    existing_data = get_at_data("Inventory_Audit")
+                    match_id = None
+                    if not existing_data.empty:
+                        # Find if SKU was already scanned TODAY
+                        match = existing_data[(existing_data['SKU'] == a_sku) & (existing_data['Date'] == date.today())]
+                        if not match.empty:
+                            match_id = match.iloc[0]['id']
+
+                    fields = {
                         "Date": str(date.today()), 
                         "SKU": a_sku, 
                         "Name": a_name, 
                         "Category": a_cat,
                         "System_Qty": int(s_qty), 
                         "Manual_Qty": int(m_qty),
-                        "Mannequin": int(e_qty), # New Column for Airtable
+                        "Mannequin": int(e_qty),
                         "User": selected_staff
-                    }}]}
-                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=p)
-                    st.success(f"Audit saved for {selected_staff}")
+                    }
+
+                    if match_id:
+                        # UPDATE existing record
+                        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit/{match_id}", headers=HEADERS, json={"fields": fields})
+                        st.success(f"Updated existing entry for {a_sku}")
+                    else:
+                        # CREATE new record
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": fields}]})
+                        st.success(f"Audit saved for {selected_staff}")
                     st.rerun()
                 elif selected_staff == "Select Counter...":
                     st.error("Please select who did the count.")
@@ -162,21 +178,36 @@ if st.session_state["authentication_status"]:
                     
         aud_hist = get_at_data("Inventory_Audit")
         if not aud_hist.empty:
-            # --- UPDATED LOGIC FOR CALCULATION ---
-            # Fill NaN for Mannequin in case old records don't have it
             if 'Mannequin' not in aud_hist.columns:
                 aud_hist['Mannequin'] = 0
             else:
                 aud_hist['Mannequin'] = aud_hist['Mannequin'].fillna(0)
 
-            # (Manual + Mannequin) - System = Difference
             aud_hist['Diff'] = (aud_hist['Manual_Qty'] + aud_hist['Mannequin']) - aud_hist['System_Qty']
             
+            # --- DELETE FEATURE SECTION ---
+            st.write("---")
+            st.write("#### 🗑️ Manage Today's Entries")
+            today_logs = aud_hist[aud_hist['Date'] == date.today()].copy()
+            
+            if not today_logs.empty:
+                # Create a small interactive table for deletion
+                delete_col = st.columns([4, 1])
+                with delete_col[0]:
+                    to_delete = st.selectbox("Select SKU to remove from today's log", options=today_logs['SKU'].unique())
+                
+                with delete_col[1]:
+                    st.write("") # Spacer
+                    if st.button("🗑️ Delete Row"):
+                        rec_id = today_logs[today_logs['SKU'] == to_delete].iloc[0]['id']
+                        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit/{rec_id}", headers=HEADERS)
+                        st.warning(f"Deleted {to_delete}")
+                        st.rerun()
+
             if 'Category' in aud_hist.columns:
                 st.write("#### Category Summary (Today)")
                 today_data = aud_hist[aud_hist['Date'] == date.today()]
                 if not today_data.empty:
-                    # Summary also includes Mannequin counts now
                     summary = today_data.groupby('Category').agg({'Manual_Qty':'sum', 'Mannequin':'sum', 'SKU':'count'})
                     summary['Total Physical'] = summary['Manual_Qty'] + summary['Mannequin']
                     summary.columns = ['Depot Units', 'Mannequin Units', 'Unique Items', 'Total Units']
@@ -187,7 +218,7 @@ if st.session_state["authentication_status"]:
             existing_cols = [c for c in display_cols if c in aud_hist.columns]
             st.dataframe(aud_hist[existing_cols], use_container_width=True)
 
-    # ... REST OF TABS (REMAIN UNCHANGED) ...
+    # ... REST OF TABS ...
     if not df_pv.empty:
         with tabs[2]: # COMPARE
             if haiti_active:
