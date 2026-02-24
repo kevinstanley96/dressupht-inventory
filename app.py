@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import streamlit_authenticator as stauth
+import os
 from datetime import date, datetime
 
 # 1. Page Config
@@ -26,9 +27,13 @@ if st.session_state["authentication_status"]:
     st.sidebar.title(f"Welcome {st.session_state['name']}")
 
     # --- 2. AIRTABLE CONFIG ---
-    AIR_TOKEN = "pat1SYxIQWWcgkwy5.35f38c5bdc516561cbacc01116d09eeac8e861f3c442af68fcf19ee58e9dc72a"
-    BASE_ID = "app5eJFgtbCaJHGhc"
-    HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
+    AIR_TOKEN = os.getenv("AIRTABLE_TOKEN")
+BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+
+HEADERS = {
+    "Authorization": f"Bearer {AIR_TOKEN}",
+    "Content-Type": "application/json"
+}
 
     def get_at_data(table):
         try:
@@ -233,3 +238,4 @@ if st.session_state["authentication_status"]:
                 st.table(sh[['Date', 'Quantity', 'User']])
     else:
         st.info("Upload PV Inventory file in the sidebar to unlock performance tabs.")
+
