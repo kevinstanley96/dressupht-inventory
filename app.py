@@ -12,7 +12,7 @@ config = {
     'credentials': {
         'usernames': {
             'kevin': {'name': 'Dressup Haiti Admin', 'password': 'The$100$Raven'},
-            'david': {'name': 'Inventory Manager', 'password': 'Dressuphaiti2026'}
+            'staff1': {'name': 'Inventory Manager', 'password': 'secretpassword456'}
         }
     },
     'cookie': {'expiry_days': 30, 'key': 'inventory_signature_key', 'name': 'inventory_cookie'}
@@ -67,6 +67,7 @@ if st.session_state["authentication_status"]:
 
     df_pv = pd.DataFrame()
     haiti_active = False
+    sales_ready = False
     sku_to_name, sku_to_stock, sku_to_cat = {}, {}, {}
 
     if file_pv:
@@ -79,7 +80,9 @@ if st.session_state["authentication_status"]:
             df_prev = clean_data(file_pv_prev, "current quantity dressupht pv")
             df_pv = pd.merge(df_pv, df_prev[['SKU', 'Stock']], on='SKU', how='left', suffixes=('', '_prev'))
             df_pv['Sold'] = (df_pv['Stock_prev'].fillna(0) - df_pv['Stock']).clip(lower=0)
-        else: df_pv['Sold'] = 0
+            sales_ready = True
+        else: 
+            df_pv['Sold'] = 0
         
         if file_haiti:
             df_haiti = clean_data(file_haiti, "current quantity dressup haiti")
@@ -93,7 +96,8 @@ if st.session_state["authentication_status"]:
         return df_to_filter
 
     # --- 4. TABS ---
-    tabs = st.tabs(["➕ Intake", "🕵️ Audit", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "⚠️ Low", "💰 Finance", "📋 Library", "📈 Analytics"])
+    # ADDED "📊 Sales" Tab here
+    tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📊 Sales", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "💰 Finance", "📋 Library", "📈 Analytics"])
     
     with tabs[0]: # INTAKE
         st.subheader("Cloud Shipment Record")
@@ -162,8 +166,24 @@ if st.session_state["authentication_status"]:
             st.write("#### Detailed History")
             st.dataframe(aud_hist, use_container_width=True)
 
+    with tabs[2]: # NEW SALES TAB
+        st.subheader("📊 Sales Tracking (Weekly)")
+        if sales_ready:
+            sales_df = df_pv[df_pv['Sold'] > 0].copy()
+            sales_df['Revenue'] = sales_df['Sold'] * sales_df['Price']
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Units Sold", int(sales_df['Sold'].sum()))
+            m2.metric("Total Revenue", f"${sales_df['Revenue'].sum():,.2f}")
+            m3.metric("Unique Items Sold", len(sales_df))
+            
+            st.write("#### Sales Breakdown")
+            st.dataframe(get_view(sales_df[['Full Name', 'SKU', 'Stock_prev', 'Stock', 'Sold', 'Price', 'Revenue']].sort_values('Sold', ascending=False)), use_container_width=True)
+        else:
+            st.warning("⚠️ Please upload both **THIS Saturday** and **LAST Saturday** files in the sidebar to calculate sales.")
+
     if not df_pv.empty:
-        with tabs[2]: # COMPARE
+        with tabs[3]: # COMPARE
             st.subheader("🔄 PV vs Haiti Stock")
             if haiti_active:
                 comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv, on='SKU', suffixes=('_haiti', '_pv')).drop_duplicates(subset=['SKU'])
@@ -171,7 +191,7 @@ if st.session_state["authentication_status"]:
                 st.dataframe(get_view(view[['Full Name', 'SKU', 'Stock_pv', 'Stock_haiti']]), use_container_width=True)
             else: st.warning("Upload Haiti file to compare.")
 
-        with tabs[3]: # TRANSFERS
+        with tabs[4]: # TRANSFERS
             st.subheader("🚚 Transfer Recommendations")
             if haiti_active:
                 def req(r):
@@ -182,7 +202,7 @@ if st.session_state["authentication_status"]:
                 st.dataframe(get_view(comp[comp['Request'] > 0][['Full Name', 'SKU', 'Stock_haiti', 'Stock_pv', 'Sold', 'Request']]), use_container_width=True)
             else: st.warning("Upload Haiti file to see transfer needs.")
 
-        with tabs[4]: # FAST/SLOW
+        with tabs[5]: # FAST/SLOW
             st.subheader("🔥 Performance Analysis")
             cw1, cw2 = st.columns(2)
             cw1.write("**Top 10 Sellers**")
@@ -190,13 +210,9 @@ if st.session_state["authentication_status"]:
             cw2.write("**Bottom 10 (Dead Stock)**")
             cw2.table(df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold']])
 
-        with tabs[5]: # OOS
+        with tabs[6]: # OOS
             st.subheader("❌ Out of Stock")
             st.dataframe(get_view(df_pv[df_pv['Stock'] == 0]), use_container_width=True)
-
-        with tabs[6]: # LOW
-            st.subheader("⚠️ Low Stock (1-5 units)")
-            st.dataframe(get_view(df_pv[(df_pv['Stock'] > 0) & (df_pv['Stock'] <= 5)]), use_container_width=True)
 
         with tabs[7]: # FINANCE
             st.subheader("💰 Inventory Valuation")
@@ -217,4 +233,3 @@ if st.session_state["authentication_status"]:
                 st.table(sh[['Date', 'Quantity', 'User']])
     else:
         st.info("Upload PV Inventory file in the sidebar to unlock performance tabs.")
-
