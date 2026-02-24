@@ -28,6 +28,9 @@ if st.session_state["authentication_status"]:
 
     # --- 2. AIRTABLE CONFIG ---
     AIR_TOKEN = os.getenv("AIRTABLE_TOKEN")
+    if not AIR_TOKEN:
+    st.error("Airtable token not found. Set environment variable AIRTABLE_TOKEN.")
+    st.stop()
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 
 HEADERS = {
@@ -238,4 +241,5 @@ HEADERS = {
                 st.table(sh[['Date', 'Quantity', 'User']])
     else:
         st.info("Upload PV Inventory file in the sidebar to unlock performance tabs.")
+
 
