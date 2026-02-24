@@ -4,7 +4,7 @@ import requests
 import streamlit_authenticator as stauth
 from datetime import date, datetime
 
-# 1. Page Config - FORCE WIDE MODE
+# 1. Page Config
 st.set_page_config(page_title="Dressupht Intelligence", layout="wide")
 
 # --- USER AUTHENTICATION ---
@@ -51,44 +51,34 @@ if st.session_state["authentication_status"]:
         existing = [c for c in list(df.columns) if c in needed.keys()]
         df = df[existing].copy()
         df.columns = [needed[c] for c in existing]
-        
-        if 'Category' not in df.columns:
-            df['Category'] = "Uncategorized"
-        else:
-            df['Category'] = df['Category'].fillna("Uncategorized")
-            
+        if 'Category' not in df.columns: df['Category'] = "Uncategorized"
+        else: df['Category'] = df['Category'].fillna("Uncategorized")
         df['SKU'] = df['SKU'].astype(str).str.strip()
         df['Full Name'] = df['Wig Name'] + " (" + df['Style'].fillna('') + ")"
         df['Stock'] = pd.to_numeric(df['Stock'], errors='coerce').fillna(0)
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
         return df
 
-    # --- 3. SIDEBAR UPLOADS ---
+    # --- 3. DATA PROCESSING ---
     st.sidebar.subheader("📁 Data Upload Center")
     file_pv = st.sidebar.file_uploader("📍 THIS Saturday (PV)", type=['xlsx'])
     file_pv_prev = st.sidebar.file_uploader("🕒 LAST Saturday (PV)", type=['xlsx'])
     file_haiti = st.sidebar.file_uploader("🌐 Dressup Haiti", type=['xlsx'])
 
     df_pv = pd.DataFrame()
-    sku_to_name = {}
-    sku_to_stock = {}
-    sku_to_cat = {} 
+    sku_to_name, sku_to_stock, sku_to_cat = {}, {}, {}
 
     if file_pv:
         df_pv = clean_data(file_pv, "current quantity dressupht pv")
         sku_to_name = dict(zip(df_pv['SKU'], df_pv['Full Name']))
         sku_to_stock = dict(zip(df_pv['SKU'], df_pv['Stock']))
-        sku_to_cat = dict(zip(df_pv['SKU'], df_pv['Category'])) 
+        sku_to_cat = dict(zip(df_pv['SKU'], df_pv['Category']))
         
         if file_pv_prev:
             df_prev = clean_data(file_pv_prev, "current quantity dressupht pv")
             df_pv = pd.merge(df_pv, df_prev[['SKU', 'Stock']], on='SKU', how='left', suffixes=('', '_prev'))
             df_pv['Sold'] = (df_pv['Stock_prev'].fillna(0) - df_pv['Stock']).clip(lower=0)
         else: df_pv['Sold'] = 0
-        haiti_active = False
-        if file_haiti:
-            df_haiti = clean_data(file_haiti, "current quantity dressup haiti")
-            haiti_active = True
 
     st.title("🦱 Dressupht Pv: Intelligence Center")
     search = st.text_input("🔍 Search Name or SKU")
@@ -98,86 +88,82 @@ if st.session_state["authentication_status"]:
         return df_to_filter
 
     # --- 4. TABS ---
-    tabs = st.tabs(["➕ Intake", "🕵️ Audit", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "⚠️ Low", "💰 Finance", "📋 Library", "📈 Analytics"])
+    tabs = st.tabs(["➕ Intake", "🕵️ Audit", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "📋 Library", "📈 Analytics"])
     
+    with tabs[0]: # INTAKE
+        st.subheader("Cloud Shipment Record")
+        i_sku = st.text_input("Scan SKU for Intake", key="intake_scan").strip()
+        det_n = sku_to_name.get(i_sku, "Unknown Item")
+        if i_sku: st.success(f"Item: {det_n}")
+        with st.form("in_form", clear_on_submit=True):
+            d_i = st.date_input("Date", value=date.today())
+            q_i = st.number_input("Qty Received", min_value=1)
+            if st.form_submit_button("Sync Intake"):
+                p = {"records": [{"fields": {"Date": str(d_i), "SKU": i_sku, "Name": det_n, "Quantity": q_i, "User": st.session_state['username']}}]}
+                requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=p)
+                st.rerun()
+        st.dataframe(get_at_data("Shipments"), use_container_width=True)
+
     with tabs[1]: # AUDIT
         st.subheader("🕵️ Physical Inventory Audit")
-        
         staff_members = ["Select Counter...", "Angelina", "Gerdine", "Annaelle", "David", "Kevin"]
         selected_staff = st.selectbox("Who is counting?", options=staff_members)
-        
         a_sku = st.text_input("Scan SKU for Audit", key="audit_scan").strip()
-        s_qty = sku_to_stock.get(a_sku, 0)
-        a_name = sku_to_name.get(a_sku, "Unknown Item")
-        a_cat = sku_to_cat.get(a_sku, "Uncategorized") 
         
         if a_sku:
+            s_qty = sku_to_stock.get(a_sku, 0)
+            a_name = sku_to_name.get(a_sku, "Unknown Item")
+            a_cat = sku_to_cat.get(a_sku, "Uncategorized")
             c1, c2, c3 = st.columns(3)
             c1.metric("Wig Name", a_name)
             c2.metric("Category", a_cat)
             c3.metric("System Qty", int(s_qty))
             
-        with st.form("aud_form", clear_on_submit=True):
-            col_m1, col_m2, col_m3 = st.columns(3)
-            m_qty = col_m1.number_input("Depot Qty", min_value=0, step=1)
-            e_qty = col_m2.number_input("Mannequin Qty", min_value=0, step=1)
-            r_qty = col_m3.number_input("Returns (Not in System)", min_value=0, step=1)
-            
-            total_physical = m_qty + e_qty + r_qty
-            diff_value = int(total_physical - s_qty)
-            
-            st.info(f"Total Physical Count: **{total_physical}** | Difference: **{diff_value}**")
+            with st.form("aud_form", clear_on_submit=True):
+                col_m1, col_m2, col_m3 = st.columns(3)
+                m_qty = col_m1.number_input("Depot Qty", min_value=0, step=1)
+                e_qty = col_m2.number_input("Mannequin Qty", min_value=0, step=1)
+                r_qty = col_m3.number_input("Returns (Not in System)", min_value=0, step=1)
+                total_physical = m_qty + e_qty + r_qty
+                diff_value = int(total_physical - s_qty)
+                st.info(f"Total Physical Count: **{total_physical}** | Difference: **{diff_value}**")
 
-            if st.form_submit_button("Log Audit"):
-                if a_sku and selected_staff != "Select Counter...":
-                    existing_data = get_at_data("Inventory_Audit")
-                    match_id = None
-                    if not existing_data.empty:
-                        match = existing_data[(existing_data['SKU'] == a_sku) & (existing_data['Date'] == date.today())]
-                        if not match.empty:
-                            match_id = match.iloc[0]['id']
-
-                    fields = {
-                        "Date": str(date.today()), 
-                        "SKU": a_sku, 
-                        "Name": a_name, 
-                        "Category": a_cat,
-                        "System_Qty": int(s_qty), 
-                        "Manual_Qty": int(m_qty),
-                        "Mannequin": int(e_qty),
-                        "Returns": int(r_qty),
-                        "Diff": diff_value,
-                        "User": selected_staff
-                    }
-
-                    if match_id:
-                        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit/{match_id}", headers=HEADERS, json={"fields": fields})
-                        st.success(f"Updated existing entry for {a_sku}")
-                    else:
+                if st.form_submit_button("Log Audit"):
+                    if selected_staff != "Select Counter...":
+                        fields = {"Date": str(date.today()), "SKU": a_sku, "Name": a_name, "Category": a_cat, "System_Qty": int(s_qty), "Manual_Qty": int(m_qty), "Mannequin": int(e_qty), "Returns": int(r_qty), "Diff": diff_value, "User": selected_staff}
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": fields}]})
-                        st.success(f"Audit saved for {selected_staff}")
-                    st.rerun()
-                else:
-                    st.error("Select staff and scan SKU.")
-                        
+                        st.success("Audit saved!")
+                        st.rerun()
+
         aud_hist = get_at_data("Inventory_Audit")
         if not aud_hist.empty:
-            # FIX FOR AttributeError & Missing Columns
             for col in ['Mannequin', 'Manual_Qty', 'Returns', 'System_Qty']:
-                if col not in aud_hist.columns:
-                    aud_hist[col] = 0
-                else:
-                    aud_hist[col] = pd.to_numeric(aud_hist[col], errors='coerce').fillna(0)
-
+                if col not in aud_hist.columns: aud_hist[col] = 0
+                else: aud_hist[col] = pd.to_numeric(aud_hist[col], errors='coerce').fillna(0)
             aud_hist['Diff'] = (aud_hist['Manual_Qty'] + aud_hist['Mannequin'] + aud_hist['Returns']) - aud_hist['System_Qty']
             
+            # Delete logic
+            st.write("---")
+            today_logs = aud_hist[aud_hist['Date'] == date.today()].copy()
+            if not today_logs.empty:
+                del_sku = st.selectbox("Select SKU to delete", options=today_logs['SKU'].unique())
+                if st.button("🗑️ Delete Selected Row"):
+                    rid = today_logs[today_logs['SKU'] == del_sku].iloc[0]['id']
+                    requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit/{rid}", headers=HEADERS)
+                    st.rerun()
+            
             st.write("#### Detailed History")
-            display_cols = ['Date', 'Category', 'SKU', 'Name', 'System_Qty', 'Manual_Qty', 'Mannequin', 'Returns', 'Diff', 'User']
-            existing_cols = [c for c in display_cols if c in aud_hist.columns]
-            st.dataframe(aud_hist[existing_cols], use_container_width=True)
+            st.dataframe(aud_hist, use_container_width=True)
 
-    # --- REMAINING TABS (Simplified for this version) ---
-    if not df_pv.empty:
-        with tabs[8]: st.dataframe(get_view(df_pv), use_container_width=True)
-    else:
-        st.info("Please upload data files to enable comparison and library views.")
+    with tabs[5]: # LIBRARY
+        if not df_pv.empty: st.dataframe(get_view(df_pv), use_container_width=True)
+        else: st.info("Upload PV file to see library.")
+
+    with tabs[6]: # ANALYTICS
+        st.subheader("📈 Shipment History")
+        at_ship = get_at_data("Shipments")
+        if not at_ship.empty:
+            sel_s = st.selectbox("Pick SKU for history", at_ship['SKU'].unique())
+            sh = at_ship[at_ship['SKU'] == sel_s]
+            st.metric("Total Received", int(sh['Quantity'].sum()))
+            st.table(sh[['Date', 'Quantity', 'User']])
