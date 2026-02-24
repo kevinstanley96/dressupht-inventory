@@ -81,7 +81,6 @@ def clean_data(file, loc_col):
     for col in ['Wig Name', 'Style']:
         if col in df.columns:
             df[col] = df[col].astype(str)
-            # Hard replacements for common Square/Excel export errors
             df[col] = df[col].str.replace('â€', '”', regex=False)
             df[col] = df[col].str.replace('â€™', "'", regex=False)
             df[col] = df[col].str.replace('â€œ', '“', regex=False)
@@ -100,11 +99,12 @@ if st.session_state["authentication_status"]:
     curr_user = st.session_state['username']
     
     try:
-        AIR_TOKEN = st.secrets["AIRTOKEN"] # Make sure these match your secrets exactly
-        BASE_ID = st.secrets["BASEID"]
+        # Reverted to your original secret names
+        AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"] 
+        BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
-        st.error("Secrets Error. Check AIRTOKEN and BASEID in Streamlit.")
+        st.error("Secrets Error. Please check your Streamlit Cloud Secrets for AIRTABLE_TOKEN and AIRTABLE_BASE_ID.")
         st.stop()
 
     df_pv = pd.DataFrame()
@@ -203,11 +203,6 @@ if st.session_state["authentication_status"]:
 
         with tabs[2]: # Sales
             if sales_ready: st.dataframe(df_pv[df_pv['Sold'] > 0], use_container_width=True, hide_index=True)
-
-        with tabs[3]: # Compare
-            if haiti_active:
-                comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv, on='SKU', suffixes=('_haiti', '_pv'))
-                st.dataframe(comp, use_container_width=True, hide_index=True)
 
         with tabs[6]: # OOS
             if not df_pv.empty: st.dataframe(df_pv[df_pv['Stock'] == 0], use_container_width=True, hide_index=True)
