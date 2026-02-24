@@ -27,16 +27,17 @@ if st.session_state["authentication_status"]:
     st.sidebar.title(f"Welcome {st.session_state['name']}")
 
     # --- 2. AIRTABLE CONFIG ---
-    AIR_TOKEN = os.getenv("AIRTABLE_TOKEN")
-    if not AIR_TOKEN:
-    st.error("Airtable token not found. Set environment variable AIRTABLE_TOKEN.")
-    st.stop()
-BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
+BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
 
 HEADERS = {
     "Authorization": f"Bearer {AIR_TOKEN}",
     "Content-Type": "application/json"
 }
+
+if not AIR_TOKEN:
+    st.error("Airtable token missing in Streamlit secrets.")
+    st.stop()
 
     def get_at_data(table):
         try:
@@ -241,5 +242,6 @@ HEADERS = {
                 st.table(sh[['Date', 'Quantity', 'User']])
     else:
         st.info("Upload PV Inventory file in the sidebar to unlock performance tabs.")
+
 
 
