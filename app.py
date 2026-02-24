@@ -209,6 +209,3 @@ if st.session_state["authentication_status"]:
 elif st.session_state["authentication_status"] is False:
     st.error("Login failed.")
 
-
-
-**Would you like me to adjust the "Download" button so it exports specifically for a certain Excel format?**
