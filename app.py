@@ -34,28 +34,49 @@ authenticator.login()
 
 # --- HELPER FUNCTIONS ---
 def get_at_data(table, base_id, headers):
+    all_records = []
+    offset = None
     try:
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
-        # Alphabetical sorting for consistency
-        params = {"sort[0][field]": "Full Name", "sort[0][direction]": "asc"}
-        # If fetching history tables, sort by Date instead
-        if table in ["Shipments", "Inventory_Audit"]:
-            params = {"sort[0][field]": "Date", "sort[0][direction]": "desc"}
+        
+        # --- PAGINATION LOOP: Fetch ALL records beyond the first 100 ---
+        while True:
+            params = {}
+            if offset:
+                params['offset'] = offset
             
-        res = requests.get(url, headers=headers, params=params)
-        if res.status_code == 200:
-            records = res.json().get('records', [])
-            if not records: return pd.DataFrame()
-            df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in records])
+            # Sorting logic
+            if table in ["Shipments", "Inventory_Audit"]:
+                params['sort[0][field]'] = "Date"
+                params['sort[0][direction]'] = "desc"
+            else:
+                params['sort[0][field]'] = "Full Name"
+                params['sort[0][direction]'] = "asc"
+
+            res = requests.get(url, headers=headers, params=params)
+            if res.status_code != 200:
+                break
+                
+            data = res.json()
+            records = data.get('records', [])
+            all_records.extend(records)
             
-            if 'Date' in df.columns:
-                temp_dt = pd.to_datetime(df['Date'], errors='coerce')
-                df['Time'] = temp_dt.dt.strftime('%H:%M')
-                df['Date'] = temp_dt.dt.date
-            if 'Last Updated' in df.columns:
-                df['Last Updated Display'] = pd.to_datetime(df['Last Updated']).dt.strftime('%m/%d %H:%M')
-            return df
-        return pd.DataFrame()
+            # Check if there are more records to fetch
+            offset = data.get('offset')
+            if not offset:
+                break
+        
+        if not all_records: return pd.DataFrame()
+        
+        df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_records])
+        
+        if 'Date' in df.columns:
+            temp_dt = pd.to_datetime(df['Date'], errors='coerce')
+            df['Time'] = temp_dt.dt.strftime('%H:%M')
+            df['Date'] = temp_dt.dt.date
+        if 'Last Updated' in df.columns:
+            df['Last Updated Display'] = pd.to_datetime(df['Last Updated']).dt.strftime('%m/%d %H:%M')
+        return df
     except: return pd.DataFrame()
 
 def clean_data(file, loc_col):
@@ -66,7 +87,6 @@ def clean_data(file, loc_col):
     df = df[existing].copy()
     df.columns = [needed[c] for c in existing]
     
-    # ENCODING FIX (Fixes 10â€ -> 10”)
     for col in ['Wig Name', 'Style']:
         if col in df.columns:
             df[col] = df[col].astype(str).str.replace('â€', '”', regex=False).str.replace('â€™', "'", regex=False).str.replace('â€œ', '“', regex=False)
@@ -146,6 +166,7 @@ if st.session_state["authentication_status"]:
                 view = data[['Full Name', 'Stock', 'Last Updated Display']]
                 if search: view = view[view['Full Name'].str.contains(search, case=False)]
                 st.dataframe(view, use_container_width=True, hide_index=True)
+                st.caption(f"Showing {len(view)} wigs in inventory.")
             else: st.warning("Loading inventory...")
 
     else:
