@@ -20,35 +20,40 @@ config = {
     'cookie': {'expiry_days': 30, 'key': 'inventory_signature_key', 'name': 'inventory_cookie'}
 }
 
-authenticator = stauth.Authenticate(
-    config['credentials'], 
-    config['cookie']['name'], 
-    config['cookie']['key'], 
-    config['cookie']['expiry_days']
-)
-
+authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 authenticator.login()
 
-# --- HELPER FUNCTIONS ---
+# --- BULLETPROOF HELPER FUNCTION ---
 def get_at_data(table, base_id, headers):
     try:
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
-        # Sorting logic: Master_Inventory by Name, others by Date
-        params = {"sort[0][field]": "Wig Name", "sort[0][direction]": "asc"} if table == "Master_Inventory" else {"sort[0][field]": "Date", "sort[0][direction]": "desc"}
-        res = requests.get(url, headers=headers, params=params)
+        res = requests.get(url, headers=headers)
         
         if res.status_code == 200:
-            data = res.json().get('records', [])
-            if not data: return pd.DataFrame()
-            df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in data])
+            records = res.json().get('records', [])
+            if not records:
+                return pd.DataFrame()
             
+            # Flatten Airtable response
+            df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in records])
+            
+            # Formatting Date/Time if they exist (for Shipments/Audit tables)
             if 'Date' in df.columns:
-                temp_dt = pd.to_datetime(df['Date'])
+                temp_dt = pd.to_datetime(df['Date'], errors='coerce')
                 df['Time'] = temp_dt.dt.strftime('%H:%M')
                 df['Date'] = temp_dt.dt.date
+            
+            # Handling "Last Updated" formatting if it exists
+            if 'Last Updated' in df.columns:
+                df['Last Updated'] = pd.to_datetime(df['Last Updated']).dt.strftime('%m/%d %H:%M')
+                
             return df
+        else:
+            st.error(f"Airtable Error {res.status_code}: {res.text}")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"App Error: {e}")
         return pd.DataFrame()
-    except: return pd.DataFrame()
 
 def clean_data(file, loc_col):
     df = pd.read_excel(file, skiprows=1)
@@ -60,106 +65,74 @@ def clean_data(file, loc_col):
     df['SKU'] = df['SKU'].astype(str).str.strip()
     df['Full Name'] = df['Wig Name'] + " (" + df['Style'].fillna('') + ")"
     df['Stock'] = pd.to_numeric(df['Stock'], errors='coerce').fillna(0)
-    df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
     return df
 
 # --- MAIN APP ---
 if st.session_state["authentication_status"]:
     authenticator.logout('Logout', 'sidebar')
     curr_user = st.session_state['username']
-    st.sidebar.title(f"Welcome {st.session_state['name']}")
-
+    
     try:
         AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
         BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
-        st.error("Missing Airtable Secrets.")
+        st.error("Missing Secrets!")
         st.stop()
 
-    # --- ADMIN SIDEBAR: LIVE SYNC LOGIC ---
-    df_pv = pd.DataFrame()
+    # --- ADMIN SIDEBAR ---
     if curr_user != 'guest':
-        st.sidebar.subheader("📅 Saturday Reports")
-        file_pv = st.sidebar.file_uploader("THIS Saturday (PV)", type=['xlsx'])
-        if file_pv: df_pv = clean_data(file_pv, "current quantity dressupht pv")
-
-        st.sidebar.markdown("---")
         st.sidebar.subheader("⚡ Live Guest Sync")
-        st.sidebar.caption("Update target: 08:10, 11:10, 14:10...")
-        quick_file = st.sidebar.file_uploader("Upload Square Export", type=['xlsx'], key="quick")
-        
+        quick_file = st.sidebar.file_uploader("Upload Square Export", type=['xlsx'])
         if quick_file:
             df_quick = clean_data(quick_file, "current quantity dressupht pv")
-            if st.sidebar.button("🚀 Sync to Guest Library"):
-                with st.spinner("🔄 Wiping old data and uploading new stock..."):
-                    # 1. Get and Delete all existing records
+            if st.sidebar.button("🚀 Sync Now"):
+                with st.spinner("Updating Cloud..."):
+                    # 1. Clear old
                     old_data = get_at_data("Master_Inventory", BASE_ID, HEADERS)
                     if not old_data.empty:
                         old_ids = old_data['id'].tolist()
                         for i in range(0, len(old_ids), 10):
-                            batch = old_ids[i:i+10]
-                            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, params={"records[]": batch})
+                            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, params={"records[]": old_ids[i:i+10]})
                     
-                    # 2. Upload New Records in batches of 10
-                    new_recs = []
-                    for _, row in df_quick.iterrows():
-                        new_recs.append({"fields": {
-                            "Full Name": str(row['Full Name']),
-                            "SKU": str(row['SKU']),
-                            "Stock": int(row['Stock']),
-                            "Category": str(row['Category'])
-                        }})
-                    
+                    # 2. Upload New
+                    new_recs = [{"fields": {"Full Name": str(r['Full Name']), "SKU": str(r['SKU']), "Stock": int(r['Stock']), "Category": str(r['Category'])}} for _, r in df_quick.iterrows()]
                     for i in range(0, len(new_recs), 10):
-                        batch = new_recs[i:i+10]
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": batch})
-                    
-                    st.sidebar.success(f"✅ Library Live! Updated at {datetime.now().strftime('%H:%M')}")
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": new_recs[i:i+10]})
+                    st.sidebar.success("Done!")
+                    time.sleep(1)
+                    st.rerun()
 
     st.title("🦱 Dressupht Intelligence")
-    search = st.text_input("🔍 Search Name or SKU")
+    search = st.text_input("🔍 Search Inventory")
 
     # --- TABS ---
     if curr_user == 'guest':
         tabs = st.tabs(["📋 Library"])
         with tabs[0]:
             st.subheader("PV Depot Inventory")
-            cloud_inv = get_at_data("Master_Inventory", BASE_ID, HEADERS)
-            if not cloud_inv.empty:
-                # Security: ensure Guest never sees Price or internal ID
-                guest_view = cloud_inv.drop(columns=['Price', 'id'], errors='ignore')
+            # We fetch the data directly here
+            data = get_at_data("Master_Inventory", BASE_ID, HEADERS)
+            
+            if not data.empty:
+                # Remove internal IDs and sensitive columns if they exist
+                to_hide = ['id', 'Price', 'Value']
+                display_df = data.drop(columns=[c for c in to_hide if c in data.columns])
+                
+                # Apply Search
                 if search:
-                    guest_view = guest_view[guest_view['Full Name'].str.contains(search, case=False) | guest_view['SKU'].str.contains(search, case=False)]
-                st.dataframe(guest_view, use_container_width=True)
+                    display_df = display_df[display_df.apply(lambda row: search.lower() in row.astype(str).str.lower().values, axis=1)]
+                
+                st.dataframe(display_df, use_container_width=True)
             else:
-                st.info("Inventory update in progress. Please wait.")
-
+                st.warning("No data found in Master_Inventory. Admin needs to Sync.")
     else:
-        # ADMIN / STAFF VIEW
-        tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📊 Sales", "📋 Full Library", "📈 Analytics"])
-        
-        with tabs[0]: # Intake
-            st.subheader("Cloud Shipment Record")
-            i_sku = st.text_input("Scan SKU", key="i_scan").strip()
-            with st.form("in_form", clear_on_submit=True):
-                q_i = st.number_input("Qty Received", min_value=1)
-                if st.form_submit_button("Sync to Cloud"):
-                    p = {"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": i_sku, "Quantity": q_i, "User": curr_user}}]}
-                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=p)
-                    st.success("Intake Recorded")
-            ships = get_at_data("Shipments", BASE_ID, HEADERS)
-            if not ships.empty: st.dataframe(ships.drop(columns=['id']), use_container_width=True)
+        # Admin Tabs
+        tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📋 Admin Library"])
+        with tabs[2]:
+            st.subheader("Cloud Library (Internal)")
+            admin_data = get_at_data("Master_Inventory", BASE_ID, HEADERS)
+            st.dataframe(admin_data, use_container_width=True)
 
-        with tabs[3]: # Admin Library
-            st.subheader("Internal Inventory (Full Data)")
-            if not df_pv.empty:
-                st.dataframe(df_pv, use_container_width=True)
-            else:
-                st.warning("Upload 'THIS Saturday' file in sidebar to see full details.")
-
-# Footer auth handling
 elif st.session_state["authentication_status"] is False:
-    st.error("Username/password is incorrect")
-elif st.session_state["authentication_status"] is None:
-    st.warning("Please enter credentials")
+    st.error("Login Failed")
