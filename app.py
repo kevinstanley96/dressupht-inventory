@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import requests
 import streamlit_authenticator as stauth
-from datetime import date
+from datetime import date, datetime
 
 # 1. Page Config
 st.set_page_config(page_title="Dressupht Intelligence", layout="wide")
 
 # --- USER AUTHENTICATION ---
+# Note: In a production environment, use st.secrets for these credentials
 config = {
     'credentials': {
         'usernames': {
@@ -34,14 +35,26 @@ def get_at_data(table, base_id, headers):
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
         params = {"sort[0][field]": "Date", "sort[0][direction]": "desc"}
         res = requests.get(url, headers=headers, params=params)
+        
         if res.status_code == 200:
             data = res.json().get('records', [])
             if not data: return pd.DataFrame()
+            
+            # Create the DataFrame with the Airtable internal ID
             df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in data])
-            if 'Date' in df.columns: df['Date'] = pd.to_datetime(df['Date']).dt.date
+            
+            # --- FORMATTING DATE AND TIME ---
+            if 'Date' in df.columns:
+                temp_date = pd.to_datetime(df['Date'])
+                # Extract Time in 12-hour format with AM/PM
+                df['Time'] = temp_date.dt.strftime('%I:%M %p')
+                # Keep Date as date only
+                df['Date'] = temp_date.dt.date
+            
             return df
         return pd.DataFrame()
-    except: return pd.DataFrame()
+    except Exception as e:
+        return pd.DataFrame()
 
 def clean_data(file, loc_col):
     df = pd.read_excel(file, skiprows=1)
@@ -58,21 +71,21 @@ def clean_data(file, loc_col):
     df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
     return df
 
-# --- MAIN APP LOGIC (Only runs if logged in) ---
+# --- MAIN APP LOGIC ---
 if st.session_state["authentication_status"]:
     authenticator.logout('Logout', 'sidebar')
     st.sidebar.title(f"Welcome {st.session_state['name']}")
 
-    # Airtable Config from Secrets
+    # Airtable Config (Ensure these exist in your Streamlit Secrets)
     try:
         AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
         BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
-    except KeyError:
-        st.error("Missing Secrets! Please add AIRTABLE_TOKEN and AIRTABLE_BASE_ID to your secrets.toml")
+    except Exception:
+        st.error("Secrets Error: Please check your AIRTABLE_TOKEN and AIRTABLE_BASE_ID settings.")
         st.stop()
 
-    # SIDEBAR & DATA LOADING
+    # --- SIDEBAR & DATA LOADING ---
     st.sidebar.subheader("📁 Data Upload Center")
     file_pv = st.sidebar.file_uploader("📍 THIS Saturday (PV)", type=['xlsx'])
     file_pv_prev = st.sidebar.file_uploader("🕒 LAST Saturday (PV)", type=['xlsx'])
@@ -109,7 +122,7 @@ if st.session_state["authentication_status"]:
         if search: return df_to_filter[df_to_filter['Full Name'].astype(str).str.contains(search, case=False) | df_to_filter['SKU'].astype(str).str.contains(search, case=False)]
         return df_to_filter
 
-    # TABS
+    # --- TABS ---
     tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📊 Sales", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "💰 Finance", "📋 Library", "📈 Analytics"])
     
     with tabs[0]: # INTAKE
@@ -121,10 +134,14 @@ if st.session_state["authentication_status"]:
             d_i = st.date_input("Date", value=date.today())
             q_i = st.number_input("Qty Received", min_value=1)
             if st.form_submit_button("Sync Intake"):
-                p = {"records": [{"fields": {"Date": str(d_i), "SKU": i_sku, "Name": det_n, "Quantity": q_i, "User": st.session_state['username']}}]}
+                p = {"records": [{"fields": {"Date": str(datetime.now()), "SKU": i_sku, "Name": det_n, "Quantity": q_i, "User": st.session_state['name']}}]}
                 requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=p)
                 st.rerun()
-        st.dataframe(get_at_data("Shipments", BASE_ID, HEADERS), use_container_width=True)
+        
+        ship_data = get_at_data("Shipments", BASE_ID, HEADERS)
+        if not ship_data.empty:
+            # Drop 'id' from view
+            st.dataframe(ship_data.drop(columns=['id']), use_container_width=True)
 
     with tabs[1]: # AUDIT
         st.subheader("🕵️ Physical Inventory Audit")
@@ -153,7 +170,7 @@ if st.session_state["authentication_status"]:
 
                 if st.form_submit_button("Log Audit"):
                     if selected_staff != "Select Counter...":
-                        fields = {"Date": str(date.today()), "SKU": a_sku, "Name": a_name, "Category": a_cat, "System_Qty": int(s_qty), "Manual_Qty": int(m_qty), "Mannequin": int(e_qty), "Returns": int(r_qty), "Diff": diff_value, "User": selected_staff}
+                        fields = {"Date": str(datetime.now()), "SKU": a_sku, "Name": a_name, "Category": a_cat, "System_Qty": int(s_qty), "Manual_Qty": int(m_qty), "Mannequin": int(e_qty), "Returns": int(r_qty), "Diff": diff_value, "User": selected_staff}
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": fields}]})
                         st.success("Audit saved!")
                         st.rerun()
@@ -177,7 +194,7 @@ if st.session_state["authentication_status"]:
                     st.rerun()
             
             st.write("#### Detailed History")
-            st.dataframe(aud_hist, use_container_width=True)
+            st.dataframe(aud_hist.drop(columns=['id']), use_container_width=True)
 
     with tabs[2]: # SALES
         st.subheader("📊 Sales Tracking (Weekly)")
@@ -192,15 +209,49 @@ if st.session_state["authentication_status"]:
         else:
             st.warning("⚠️ Please upload both THIS and LAST Saturday files.")
 
-    # Rest of tabs logic inside the if not df_pv.empty check...
+    # Only show the rest if PV file is loaded
     if not df_pv.empty:
         with tabs[3]: # COMPARE
             if haiti_active:
                 comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv, on='SKU', suffixes=('_haiti', '_pv')).drop_duplicates(subset=['SKU'])
                 view = comp[((comp['Stock_haiti'] > 75) & (comp['Stock_pv'] <= 35)) | (comp['Stock_pv'] < 5)].copy()
                 st.dataframe(get_view(view[['Full Name', 'SKU', 'Stock_pv', 'Stock_haiti']]), use_container_width=True)
+            else: st.warning("Upload Haiti file to compare.")
+
+        with tabs[4]: # TRANSFERS
+            if haiti_active:
+                def req(r):
+                    if r['Stock_pv'] == 0 and r['Stock_haiti'] > 20: return 10
+                    if r['Sold'] >= 10 and r['Stock_pv'] <= 20 and r['Stock_haiti'] > 20: return 25
+                    return 0
+                comp['Request'] = comp.apply(req, axis=1)
+                st.dataframe(get_view(comp[comp['Request'] > 0][['Full Name', 'SKU', 'Stock_haiti', 'Stock_pv', 'Sold', 'Request']]), use_container_width=True)
             else: st.warning("Upload Haiti file.")
-        # ... Add other tabs following the same pattern ...
+
+        with tabs[5]: # PERFORMANCE
+            cw1, cw2 = st.columns(2)
+            cw1.write("**Top 10 Sellers**")
+            cw1.table(df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold']])
+            cw2.write("**Bottom 10 (Dead Stock)**")
+            cw2.table(df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold']])
+
+        with tabs[6]: # OOS
+            st.dataframe(get_view(df_pv[df_pv['Stock'] == 0]), use_container_width=True)
+
+        with tabs[7]: # FINANCE
+            df_pv['Value'] = df_pv['Stock'] * df_pv['Price']
+            st.dataframe(get_view(df_pv[['Full Name', 'SKU', 'Stock', 'Price', 'Value']].sort_values('Value', ascending=False)), use_container_width=True)
+
+        with tabs[8]: # LIBRARY
+            st.dataframe(get_view(df_pv), use_container_width=True)
+
+        with tabs[9]: # ANALYTICS
+            at_ship = get_at_data("Shipments", BASE_ID, HEADERS)
+            if not at_ship.empty:
+                sel_s = st.selectbox("Pick SKU for history", at_ship['SKU'].unique())
+                sh = at_ship[at_ship['SKU'] == sel_s]
+                st.metric("Total Units Received", int(sh['Quantity'].sum()))
+                st.table(sh[['Date', 'Time', 'Quantity', 'User']])
     else:
         st.info("Upload PV Inventory file in the sidebar to unlock performance tabs.")
 
