@@ -59,13 +59,14 @@ if st.session_state["authentication_status"]:
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
         return df
 
-    # --- 3. DATA PROCESSING ---
+    # --- 3. SIDEBAR & DATA LOADING ---
     st.sidebar.subheader("📁 Data Upload Center")
     file_pv = st.sidebar.file_uploader("📍 THIS Saturday (PV)", type=['xlsx'])
     file_pv_prev = st.sidebar.file_uploader("🕒 LAST Saturday (PV)", type=['xlsx'])
     file_haiti = st.sidebar.file_uploader("🌐 Dressup Haiti", type=['xlsx'])
 
     df_pv = pd.DataFrame()
+    haiti_active = False
     sku_to_name, sku_to_stock, sku_to_cat = {}, {}, {}
 
     if file_pv:
@@ -79,6 +80,10 @@ if st.session_state["authentication_status"]:
             df_pv = pd.merge(df_pv, df_prev[['SKU', 'Stock']], on='SKU', how='left', suffixes=('', '_prev'))
             df_pv['Sold'] = (df_pv['Stock_prev'].fillna(0) - df_pv['Stock']).clip(lower=0)
         else: df_pv['Sold'] = 0
+        
+        if file_haiti:
+            df_haiti = clean_data(file_haiti, "current quantity dressup haiti")
+            haiti_active = True
 
     st.title("🦱 Dressupht Pv: Intelligence Center")
     search = st.text_input("🔍 Search Name or SKU")
@@ -88,7 +93,7 @@ if st.session_state["authentication_status"]:
         return df_to_filter
 
     # --- 4. TABS ---
-    tabs = st.tabs(["➕ Intake", "🕵️ Audit", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "📋 Library", "📈 Analytics"])
+    tabs = st.tabs(["➕ Intake", "🕵️ Audit", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "⚠️ Low", "💰 Finance", "📋 Library", "📈 Analytics"])
     
     with tabs[0]: # INTAKE
         st.subheader("Cloud Shipment Record")
@@ -124,6 +129,7 @@ if st.session_state["authentication_status"]:
                 m_qty = col_m1.number_input("Depot Qty", min_value=0, step=1)
                 e_qty = col_m2.number_input("Mannequin Qty", min_value=0, step=1)
                 r_qty = col_m3.number_input("Returns (Not in System)", min_value=0, step=1)
+                
                 total_physical = m_qty + e_qty + r_qty
                 diff_value = int(total_physical - s_qty)
                 st.info(f"Total Physical Count: **{total_physical}** | Difference: **{diff_value}**")
@@ -140,10 +146,11 @@ if st.session_state["authentication_status"]:
             for col in ['Mannequin', 'Manual_Qty', 'Returns', 'System_Qty']:
                 if col not in aud_hist.columns: aud_hist[col] = 0
                 else: aud_hist[col] = pd.to_numeric(aud_hist[col], errors='coerce').fillna(0)
+            
             aud_hist['Diff'] = (aud_hist['Manual_Qty'] + aud_hist['Mannequin'] + aud_hist['Returns']) - aud_hist['System_Qty']
             
-            # Delete logic
             st.write("---")
+            st.write("#### 🗑️ Manage Today's Entries")
             today_logs = aud_hist[aud_hist['Date'] == date.today()].copy()
             if not today_logs.empty:
                 del_sku = st.selectbox("Select SKU to delete", options=today_logs['SKU'].unique())
@@ -155,15 +162,58 @@ if st.session_state["authentication_status"]:
             st.write("#### Detailed History")
             st.dataframe(aud_hist, use_container_width=True)
 
-    with tabs[5]: # LIBRARY
-        if not df_pv.empty: st.dataframe(get_view(df_pv), use_container_width=True)
-        else: st.info("Upload PV file to see library.")
+    if not df_pv.empty:
+        with tabs[2]: # COMPARE
+            st.subheader("🔄 PV vs Haiti Stock")
+            if haiti_active:
+                comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv, on='SKU', suffixes=('_haiti', '_pv')).drop_duplicates(subset=['SKU'])
+                view = comp[((comp['Stock_haiti'] > 75) & (comp['Stock_pv'] <= 35)) | (comp['Stock_pv'] < 5)].copy()
+                st.dataframe(get_view(view[['Full Name', 'SKU', 'Stock_pv', 'Stock_haiti']]), use_container_width=True)
+            else: st.warning("Upload Haiti file to compare.")
 
-    with tabs[6]: # ANALYTICS
-        st.subheader("📈 Shipment History")
-        at_ship = get_at_data("Shipments")
-        if not at_ship.empty:
-            sel_s = st.selectbox("Pick SKU for history", at_ship['SKU'].unique())
-            sh = at_ship[at_ship['SKU'] == sel_s]
-            st.metric("Total Received", int(sh['Quantity'].sum()))
-            st.table(sh[['Date', 'Quantity', 'User']])
+        with tabs[3]: # TRANSFERS
+            st.subheader("🚚 Transfer Recommendations")
+            if haiti_active:
+                def req(r):
+                    if r['Stock_pv'] == 0 and r['Stock_haiti'] > 20: return 10
+                    if r['Sold'] >= 10 and r['Stock_pv'] <= 20 and r['Stock_haiti'] > 20: return 25
+                    return 0
+                comp['Request'] = comp.apply(req, axis=1)
+                st.dataframe(get_view(comp[comp['Request'] > 0][['Full Name', 'SKU', 'Stock_haiti', 'Stock_pv', 'Sold', 'Request']]), use_container_width=True)
+            else: st.warning("Upload Haiti file to see transfer needs.")
+
+        with tabs[4]: # FAST/SLOW
+            st.subheader("🔥 Performance Analysis")
+            cw1, cw2 = st.columns(2)
+            cw1.write("**Top 10 Sellers**")
+            cw1.table(df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold']])
+            cw2.write("**Bottom 10 (Dead Stock)**")
+            cw2.table(df_pv[df_pv['Stock'] > 0].nsmallest(10, 'Sold')[['Full Name', 'Sold']])
+
+        with tabs[5]: # OOS
+            st.subheader("❌ Out of Stock")
+            st.dataframe(get_view(df_pv[df_pv['Stock'] == 0]), use_container_width=True)
+
+        with tabs[6]: # LOW
+            st.subheader("⚠️ Low Stock (1-5 units)")
+            st.dataframe(get_view(df_pv[(df_pv['Stock'] > 0) & (df_pv['Stock'] <= 5)]), use_container_width=True)
+
+        with tabs[7]: # FINANCE
+            st.subheader("💰 Inventory Valuation")
+            df_pv['Value'] = df_pv['Stock'] * df_pv['Price']
+            st.dataframe(get_view(df_pv[['Full Name', 'SKU', 'Stock', 'Price', 'Value']].sort_values('Value', ascending=False)), use_container_width=True)
+
+        with tabs[8]: # LIBRARY
+            st.subheader("📋 Full Item Library")
+            st.dataframe(get_view(df_pv), use_container_width=True)
+
+        with tabs[9]: # ANALYTICS
+            st.subheader("📈 Shipment Velocity")
+            at_ship = get_at_data("Shipments")
+            if not at_ship.empty:
+                sel_s = st.selectbox("Pick SKU for history", at_ship['SKU'].unique())
+                sh = at_ship[at_ship['SKU'] == sel_s]
+                st.metric("Total Units Received", int(sh['Quantity'].sum()))
+                st.table(sh[['Date', 'Quantity', 'User']])
+    else:
+        st.info("Upload PV Inventory file in the sidebar to unlock performance tabs.")
