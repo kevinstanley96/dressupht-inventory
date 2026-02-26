@@ -26,7 +26,7 @@ authenticator = stauth.Authenticate(
     credentials, "inventory_cookie", "signature_key", 30
 )
 
-name, authentication_status, username = authenticator.login("Login", "main")
+name, authentication_status, username = authenticator.login(location='main')
 
 # --- MAIN LOGIC ---
 if authentication_status:
@@ -134,3 +134,4 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please enter your username and password')
+
