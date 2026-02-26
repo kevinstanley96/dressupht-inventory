@@ -6,7 +6,7 @@ from datetime import date, datetime
 import time
 
 # 1. Page Config
-st.set_page_config(page_title="Dressupht Intelligence", layout="wide")
+st.set_page_config(page_title="DRESSUP HAITI STOCK SYSTEM", layout="wide")
 
 # --- MOBILE OPTIMIZATION CSS ---
 st.markdown("""
@@ -238,3 +238,4 @@ if st.session_state["authentication_status"]:
 
 elif st.session_state["authentication_status"] is False:
     st.error("Login failed.")
+
