@@ -80,7 +80,7 @@ if st.session_state["authentication_status"]:
             'variation name': 'Style', 
             'sku': 'SKU', 
             'price': 'Price', 
-            'categories': 'Category' # Ensure 'categories' from Excel maps to 'Category'
+            'Categories': 'Category' # Ensure 'Categories' from Excel maps to 'Category'
         }
         df = df.rename(columns=mapping)
         
@@ -216,3 +216,4 @@ if st.session_state["authentication_status"]:
     # --- REMAINING TABS (Audit, Compare, Admin, Password) ---
     # Logic remains identical to ensure no feature loss
     # ...
+
