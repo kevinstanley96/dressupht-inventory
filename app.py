@@ -7,7 +7,7 @@ import time
 import base64
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.5", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.6", layout="wide")
 REPO_NAME = "kevin/dressupht-inventory" 
 
 # --- AUTHENTICATION ---
@@ -49,42 +49,56 @@ if st.session_state["authentication_status"]:
             if col not in df.columns: df[col] = "N/A"
         return df
 
-    # --- UPDATED CLEANING LOGIC (Flexible Category Mapping) ---
+    # --- UPDATED CLEANING LOGIC (With NaN Sanitization) ---
     def clean_location_data(file, loc_name):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Mapping variations of column names specifically for Square 2026 exports
         mapping = {
             'Item Name': 'Wig Name', 
             'Variation Name': 'Style', 
             'SKU': 'SKU', 
             'Price': 'Price', 
-            'Categories': 'Category', # THE FIX: Square uses plural 'Categories'
-            'Category': 'Category'     # Fallback if it's singular
+            'Categories': 'Category',
+            'Category': 'Category'
         }
         df = df.rename(columns=mapping)
 
-        # Handle Stock Mapping
+        # 1. Handle Stock Mapping
         stock_col = "Current Quantity Dressup Haiti" if loc_name == "Haiti" else "Current Quantity Dressupht Pv"
         if stock_col in df.columns:
             df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int)
         else:
             df['Stock'] = 0 
             
+        # 2. Category Fallback
         if 'Category' not in df.columns:
             df['Category'] = 'Uncategorized'
         
         df['Location'] = loc_name
+        
+        # 3. SKU Sanitization
         df['SKU'] = df['SKU'].astype(str).str.strip().replace('nan', 'NO_SKU')
         
-        w_name = df['Wig Name'].astype(str) if 'Wig Name' in df.columns else "Unknown"
-        s_name = df['Style'].astype(str).replace('nan', '') if 'Style' in df.columns else ""
+        # 4. Full Name Construction
+        w_name = df['Wig Name'].astype(str).replace('nan', 'Unknown')
+        s_name = df['Style'].astype(str).replace('nan', '')
         df['Full Name'] = w_name + " (" + s_name + ")"
         
+        # 5. Price Sanitization (The fix for your Float error)
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
         
-        return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']]
+        # 6. Global Clean: Replace any remaining NaNs across the whole dataframe
+        final_df = df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']].copy()
+        final_df = final_df.fillna({
+            'SKU': 'NO_SKU',
+            'Full Name': 'Unknown',
+            'Stock': 0,
+            'Price': 0.0,
+            'Category': 'Uncategorized'
+        })
+        
+        return final_df
 
     # --- USER CONTEXT ---
     user_data = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{username}'"})
@@ -102,36 +116,34 @@ if st.session_state["authentication_status"]:
     with tabs[0]:
         st.subheader("📦 Master Inventory")
         if not lib_data.empty:
+            # Sort logic: Apply user preference from saved info (Sort by Name default)
             disp_df = lib_data.copy().sort_values(by="Full Name")
             if user_role not in ['Admin', 'Manager'] and user_location != "Both":
                 disp_df = disp_df[disp_df['Location'] == user_location]
             
-            search = st.text_input("🔍 Search Library")
+            search = st.text_input("🔍 Search Library (Name or SKU)")
             if search:
                 disp_df = disp_df[disp_df['Full Name'].str.contains(search, case=False, na=False) | disp_df['SKU'].str.contains(search, na=False)]
             
             st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
-    # --- TAB 5: ADMIN (SYNC WITH COLUMN AUDIT) ---
+    # --- TAB 5: ADMIN (SYNC) ---
     if user_role == 'Admin':
         with tabs[4]:
-            st.subheader("🛡️ Master Sync")
+            st.subheader("🛡️ Master System Sync")
             col1, col2 = st.columns(2)
-            f_pv = col1.file_uploader("PV File", type=['xlsx'])
-            f_ht = col2.file_uploader("Haiti File", type=['xlsx'])
+            f_pv = col1.file_uploader("Upload PV File", type=['xlsx'])
+            f_ht = col2.file_uploader("Upload Haiti File", type=['xlsx'])
             
             if f_pv and f_ht:
-                # Debug Info: Show columns detected in the file
-                df_temp = pd.read_excel(f_pv, skiprows=1)
-                st.info(f"Detected columns in PV File: {', '.join(df_temp.columns)}")
-                
                 try:
                     df_pv_clean = clean_location_data(f_pv, "Pv")
                     df_ht_clean = clean_location_data(f_ht, "Haiti")
+                    full_df = pd.concat([df_pv_clean, df_ht_clean])
+                    
+                    st.info(f"Ready to Sync {len(full_df)} total items.")
                     
                     if st.button("🚀 Wipe & Sync Now"):
-                        full_df = pd.concat([df_pv_clean, df_ht_clean])
-                        
                         # Wipe Existing
                         if not lib_data.empty:
                             st.warning("Clearing current database...")
@@ -142,13 +154,26 @@ if st.session_state["authentication_status"]:
                                 requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{q}", headers=HEADERS)
                         
                         # Upload New
-                        st.info(f"Uploading {len(full_df)} items...")
+                        st.info("Uploading cleaned data...")
+                        bar = st.progress(0)
                         for i in range(0, len(full_df), 10):
                             batch = full_df.iloc[i:i+10]
-                            recs = [{"fields": r.to_dict()} for _, r in batch.iterrows()]
+                            # 🔥 The JSON Sanitizer: Ensure records are native Python types, not Numpy/NaN
+                            recs = []
+                            for _, r in batch.iterrows():
+                                recs.append({"fields": {
+                                    "SKU": str(r['SKU']),
+                                    "Full Name": str(r['Full Name']),
+                                    "Stock": int(r['Stock']),
+                                    "Price": float(r['Price']),
+                                    "Category": str(r['Category']),
+                                    "Location": str(r['Location']),
+                                    "Last_Sync_Date": str(date.today())
+                                }})
                             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
+                            bar.progress(min((i + 10) / len(full_df), 1.0))
                         
-                        st.success("Sync Complete!")
+                        st.success("Sync Complete! NaN values were handled.")
                         st.rerun()
                 except Exception as e:
                     st.error(f"Sync failed: {e}")
