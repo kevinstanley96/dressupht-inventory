@@ -7,7 +7,7 @@ import time
 import base64
 
 # --- CONFIG & INITIALIZATION ---
-st.set_page_config(page_title="Dressupht ERP v3.5", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v3.7", layout="wide")
 
 REPO_NAME = "kevin/dressupht-inventory" 
 
@@ -26,7 +26,6 @@ authentication_status = authenticator.login(location='main')
 
 if st.session_state["authentication_status"]:
     username = st.session_state["username"]
-    # LOGOUT PLACEMENT
     authenticator.logout('Logout', 'sidebar')
 
     try:
@@ -37,7 +36,7 @@ if st.session_state["authentication_status"]:
         st.error("Missing Secrets!")
         st.stop()
 
-    # --- HELPER: PAGINATION ---
+    # --- HELPER: PAGINATION (Gets all 400+ Rows) ---
     def get_at_data(table, params=None):
         all_recs = []
         url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
@@ -53,19 +52,14 @@ if st.session_state["authentication_status"]:
             else: break
         if not all_recs: return pd.DataFrame()
         df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_recs])
+        # Force column presence to avoid KeyError
+        for col in ['Category', 'Full Name', 'SKU', 'Stock', 'Price', 'Last_Sync_Date']:
+            if col not in df.columns: df[col] = "N/A"
         return df
 
     def get_user_role(user):
         df = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{user}'"})
         return df['Access Level'].iloc[0] if not df.empty and 'Access Level' in df.columns else 'Staff'
-
-    user_role = get_user_role(username)
-    if username == "Kevin": user_role = "Admin"
-    
-    # 🔥 RESTORED SIDEBAR INFO
-    st.sidebar.markdown(f"### 👤 User: **{username}**")
-    st.sidebar.markdown(f"### 🔑 Role: **{user_role}**")
-    st.sidebar.divider()
 
     def clean_data(file, loc_col_name="current quantity dressupht pv"):
         df = pd.read_excel(file, skiprows=1)
@@ -85,6 +79,14 @@ if st.session_state["authentication_status"]:
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0.0)
         return df
 
+    user_role = get_user_role(username)
+    if username == "Kevin": user_role = "Admin"
+    
+    # SIDEBAR INFO
+    st.sidebar.markdown(f"### 👤 User: **{username}**")
+    st.sidebar.markdown(f"### 🔑 Role: **{user_role}**")
+    st.sidebar.divider()
+
     # --- TABS ---
     if user_role == 'Admin':
         tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "🛡️ Admin", "🔑 Password"])
@@ -93,43 +95,14 @@ if st.session_state["authentication_status"]:
     else:
         tabs = st.tabs(["📋 Library", "🕵️ Audit", "🔑 Password"])
 
-    # --- SIDEBAR: SYNC ---
-    if user_role == 'Admin':
-        f_pv = st.sidebar.file_uploader("Upload PV Square Export", type=['xlsx'])
-        sync_date = st.sidebar.date_input("Sync Date", date.today())
-        if f_pv and st.sidebar.button("🚀 Wipe & Sync to Cloud"):
-            df_new = clean_data(f_pv)
-            existing_df = get_at_data("Master_Inventory")
-            if not existing_df.empty:
-                ids = existing_df['id'].tolist()
-                for i in range(0, len(ids), 10):
-                    batch = ids[i:i+10]
-                    query = "&".join([f"records[]={rid}" for rid in batch])
-                    requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{query}", headers=HEADERS)
-            
-            total = len(df_new)
-            bar = st.sidebar.progress(0)
-            for i in range(0, total, 10):
-                batch = df_new.iloc[i:i+10]
-                recs = [{"fields": {"SKU": str(r['SKU']), "Full Name": str(r['Full Name']), "Stock": int(r['Stock']), "Price": float(r['Price']), "Category": str(r['Category']), "Last_Sync_Date": str(sync_date)}} for _, r in batch.iterrows()]
-                requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
-                bar.progress(min((i + 10) / total, 1.0))
-                time.sleep(0.2)
-            st.sidebar.success("Database Updated!")
-            st.rerun()
-
     # --- TAB 1: LIBRARY ---
     lib_data = get_at_data("Master_Inventory")
     with tabs[0]:
         st.subheader("📦 Master Inventory")
         if not lib_data.empty:
-            # Crash protection: Ensure columns exist
-            for col in ['Category', 'Full Name', 'SKU', 'Stock', 'Price', 'Last_Sync_Date']:
-                if col not in lib_data.columns: lib_data[col] = "N/A"
-            
             c1, c2, c3 = st.columns([2, 1, 1])
             search = c1.text_input("🔍 Search Name or SKU")
-            cat_list = ["All"] + sorted([str(x) for x in lib_data['Category'].fillna("Uncategorized").unique().tolist()])
+            cat_list = ["All"] + sorted([str(x) for x in lib_data['Category'].unique().tolist()])
             selected_cat = c2.selectbox("Filter Category", cat_list)
             sort_option = c3.selectbox("Sort By", ["Name (A-Z)", "Category", "Date Sync"])
 
@@ -144,31 +117,27 @@ if st.session_state["authentication_status"]:
             elif sort_option == "Date Sync": filtered_df = filtered_df.sort_values(by="Last_Sync_Date", ascending=False)
 
             st.dataframe(filtered_df[['Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
-        else: st.warning("No data found.")
 
-    # --- TAB 2: INTAKE (WITH HISTORY & NAME MAPPING) ---
+    # --- TAB 2: INTAKE (MANUAL DATE + HISTORY) ---
     if user_role in ['Admin', 'Manager']:
         with tabs[1]:
             st.subheader("➕ New Stock Shipment")
             with st.form("intake_form"):
-                i_sku = st.text_input("Scan/Enter SKU").strip()
-                i_qty = st.number_input("Quantity Received", min_value=1)
+                col_a, col_b = st.columns(2)
+                i_date = col_a.date_input("Date Received", date.today())
+                i_sku = col_b.text_input("Scan/Enter SKU").strip()
+                i_qty = col_a.number_input("Quantity Received", min_value=1)
                 
                 if st.form_submit_button("Log Shipment"):
-                    # Find Wig Name from Master Inventory
                     wig_name = "Unknown Wig"
                     if not lib_data.empty and i_sku in lib_data['SKU'].values:
                         wig_name = lib_data[lib_data['SKU'] == i_sku]['Full Name'].iloc[0]
                     
                     ship_payload = {"records": [{"fields": {
-                        "Date": datetime.now().isoformat(), 
-                        "SKU": i_sku, 
-                        "Name": wig_name, # Mapping to Airtable 'Name'
-                        "Quantity": i_qty, 
-                        "User": username
+                        "Date": str(i_date), "SKU": i_sku, "Name": wig_name, "Quantity": i_qty, "User": username
                     }}]}
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=ship_payload)
-                    st.success(f"Logged: {i_qty} units of {wig_name}")
+                    st.success(f"Logged {i_qty} units on {i_date}")
                     time.sleep(1)
                     st.rerun()
             
@@ -176,12 +145,11 @@ if st.session_state["authentication_status"]:
             st.subheader("📜 Recent Intake History")
             history_df = get_at_data("Shipments")
             if not history_df.empty:
-                # Ensure Name column exists for display
                 if 'Name' not in history_df.columns: history_df['Name'] = "N/A"
                 history_df = history_df.sort_values(by="Date", ascending=False).head(10)
-                st.table(history_df[['Date', 'SKU', 'Name', 'Quantity', 'User']])
+                st.dataframe(history_df[['Date', 'SKU', 'Name', 'Quantity', 'User']], use_container_width=True, hide_index=True)
 
-    # --- TAB 3: AUDIT ---
+    # --- TAB 3: AUDIT (BIG DEPOT + DAMAGED) ---
     audit_idx = 2 if user_role in ['Admin', 'Manager'] else 1
     with tabs[audit_idx]:
         st.subheader("🕵️ Physical Inventory Audit")
@@ -193,9 +161,12 @@ if st.session_state["authentication_status"]:
             e_q = c1.number_input("Exposed", min_value=0)
             r_q = c2.number_input("Returns", min_value=0)
             reason = st.selectbox("Reason", ["N/A", "Damaged", "Exchange"])
-            if st.form_submit_button("Submit"):
+            if st.form_submit_button("Submit Audit"):
                 total_phys = m_q + b_q + e_q + r_q
-                audit_payload = {"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Counter_Name": username, "Manual_Qty": m_q, "Big_Depot_Qty": b_q, "Exposed_Qty": e_q, "Returns_Qty": r_q, "Total_Physical": total_phys}}]}
+                audit_payload = {"records": [{"fields": {
+                    "Date": datetime.now().isoformat(), "SKU": a_sku, "Counter_Name": username,
+                    "Manual_Qty": m_q, "Big_Depot_Qty": b_q, "Exposed_Qty": e_q, "Returns_Qty": r_q, "Total_Physical": total_phys
+                }}]}
                 requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=audit_payload)
                 if reason == "Damaged" and r_q > 0:
                     dmg_payload = {"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Quantity": r_q, "Reason": "Damaged", "User": username}}]}
@@ -212,10 +183,12 @@ if st.session_state["authentication_status"]:
                 comp = pd.merge(lib_data[['SKU', 'Full Name', 'Stock', 'Category']], df_h[['SKU', 'Stock']], on='SKU', suffixes=('_PV', '_Haiti'))
                 st.dataframe(comp, use_container_width=True, hide_index=True)
 
-    # --- TAB 5: ADMIN ---
+    # --- TAB 5: ADMIN (GITHUB BACKUP) ---
     if user_role == 'Admin':
         with tabs[4]:
             st.subheader("🛡️ Admin Panel")
+            if st.sidebar.file_uploader("Upload PV Sync", type=['xlsx'], key="sync_up"):
+                st.sidebar.warning("Use the sidebar for full Sync.")
             if st.button("📤 Push Backup to GitHub"):
                 if not lib_data.empty:
                     csv_b = lib_data.to_csv(index=False)
@@ -225,7 +198,7 @@ if st.session_state["authentication_status"]:
                     res = requests.put(url, headers=gh_h, json={"message": f"Backup {date.today()}", "content": b64})
                     if res.status_code in [200, 201]: st.success("Backup Saved!")
 
-    # --- TAB 6: PASSWORD ---
+    # --- TAB 6: PASSWORD (FIXED DEPRECATION) ---
     with tabs[-1]:
         st.subheader("🔑 Change Password")
         try:
