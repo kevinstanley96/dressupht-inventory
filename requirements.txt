@@ -4,3 +4,4 @@ openpyxl
 requests
 streamlit-authenticator==0.3.1
 fpdf
+plotly
