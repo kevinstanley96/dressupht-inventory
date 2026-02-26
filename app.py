@@ -7,7 +7,7 @@ import time
 import base64
 
 # --- CONFIG & INITIALIZATION ---
-st.set_page_config(page_title="Dressupht ERP v3.0", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v3.1", layout="wide")
 
 REPO_NAME = "kevin/dressupht-inventory" 
 
@@ -36,16 +36,27 @@ if st.session_state["authentication_status"]:
         st.error("Missing Secrets!")
         st.stop()
 
-    # --- HELPER FUNCTIONS ---
+    # --- UPDATED HELPER FUNCTION: PAGINATION FIX ---
     def get_at_data(table, params=None):
+        all_recs = []
         url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
-        res = requests.get(url, headers=HEADERS, params=params)
-        if res.status_code == 200:
-            recs = res.json().get('records', [])
-            if not recs: return pd.DataFrame()
-            data = [dict(r['fields'], id=r['id']) for r in recs]
-            return pd.DataFrame(data)
-        return pd.DataFrame()
+        if params is None: params = {}
+        
+        while True:
+            res = requests.get(url, headers=HEADERS, params=params)
+            if res.status_code == 200:
+                data = res.json()
+                all_recs.extend(data.get('records', []))
+                offset = data.get('offset')
+                if offset:
+                    params['offset'] = offset  # Ask for the next 100
+                else:
+                    break  # No more records left
+            else:
+                break
+                
+        if not all_recs: return pd.DataFrame()
+        return pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_recs])
 
     def get_user_role(user):
         df = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{user}'"})
@@ -56,7 +67,7 @@ if st.session_state["authentication_status"]:
     def delete_at_records(table, df):
         if df.empty: return
         ids = df['id'].tolist()
-        st.info(f"Clearing {len(ids)} old records to prevent duplicates...")
+        st.info(f"Clearing {len(ids)} old records...")
         for i in range(0, len(ids), 10):
             batch = ids[i:i+10]
             query = "&".join([f"records[]={rid}" for rid in batch])
@@ -87,13 +98,13 @@ if st.session_state["authentication_status"]:
 
     # --- TABS ---
     if user_role == 'Admin':
-        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "🛡️ Admin", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "📊 Sales", "🛡️ Admin", "🔑 Password"])
     elif user_role == 'Manager':
         tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔑 Password"])
     else:
         tabs = st.tabs(["📋 Library", "🕵️ Audit", "🔑 Password"])
 
-    # --- SIDEBAR: SYNC (Optimized for 400+ rows) ---
+    # --- SIDEBAR: SYNC ---
     if user_role == 'Admin':
         st.sidebar.divider()
         f_pv = st.sidebar.file_uploader("Upload PV Square Export", type=['xlsx'])
@@ -139,7 +150,7 @@ if st.session_state["authentication_status"]:
             if selected_cat != "All":
                 filtered_df = filtered_df[filtered_df['Category'] == selected_cat]
 
-            # SORTING LOGIC
+            # SORTING
             if sort_option == "Name (A-Z)":
                 filtered_df = filtered_df.sort_values(by="Full Name", ascending=True)
             elif sort_option == "Category":
@@ -166,18 +177,18 @@ if st.session_state["authentication_status"]:
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=ship_payload)
                     st.success("Shipment Logged!")
 
-    # --- TAB 3: AUDIT (BIG DEPOT + DAMAGED LOGIC) ---
+    # --- TAB 3: AUDIT ---
     audit_idx = 2 if user_role in ['Admin', 'Manager'] else 1
     with tabs[audit_idx]:
         st.subheader("🕵️ Physical Inventory Audit")
         a_sku = st.text_input("Scan SKU to Audit", key="aud_sku").strip()
         with st.form("audit_form_v3"):
             c1, c2 = st.columns(2)
-            m_q = c1.number_input("Shelf (Max 50)", min_value=0)
-            b_q = c2.number_input("Big Depot Storage", min_value=0)
+            m_q = c1.number_input("Shelf", min_value=0)
+            b_q = c2.number_input("Big Depot", min_value=0)
             e_q = c1.number_input("Exposed", min_value=0)
             r_q = c2.number_input("Returns", min_value=0)
-            reason = st.selectbox("Reason for Returns", ["N/A", "Damaged", "Exchange", "Credit Refund"])
+            reason = st.selectbox("Reason", ["N/A", "Damaged", "Exchange", "Credit Refund"])
             
             if st.form_submit_button("Submit Audit"):
                 total_phys = m_q + b_q + e_q + r_q
@@ -193,23 +204,23 @@ if st.session_state["authentication_status"]:
                 if reason == "Damaged" and r_q > 0:
                     dmg_payload = {"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Quantity": r_q, "Reason": "Damaged", "User": username}}]}
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Damaged_Stock", headers=HEADERS, json=dmg_payload)
-                st.success(f"Audit Logged. Physical: {total_phys} vs System: {sys_s}")
+                st.success(f"Audit Logged. Total: {total_phys}")
 
-    # --- TAB 4: COMPARE (HAITI VS PV) ---
+    # --- TAB 4: COMPARE ---
     if user_role == 'Admin':
         with tabs[3]:
-            st.subheader("🔄 Haiti vs. PV Comparison")
+            st.subheader("🔄 Comparison")
             f_haiti = st.file_uploader("Upload Haiti Export", type=['xlsx'], key="h_up")
             if f_haiti and not lib_data.empty:
                 df_h = clean_data(f_haiti, "current quantity dressup haiti")
                 comp = pd.merge(lib_data[['SKU', 'Full Name', 'Stock', 'Category']], df_h[['SKU', 'Stock']], on='SKU', suffixes=('_PV', '_Haiti'))
                 st.dataframe(comp, use_container_width=True, hide_index=True)
 
-    # --- TAB 5: ADMIN (BACKUP) ---
+    # --- TAB 5: ADMIN ---
     if user_role == 'Admin':
         with tabs[4]:
-            st.subheader("🛡️ Admin Panel")
-            if st.button("📤 Push Backup to GitHub"):
+            st.subheader("🛡️ Admin")
+            if st.button("📤 Backup to GitHub"):
                 if not lib_data.empty:
                     csv_b = lib_data.to_csv(index=False)
                     b64 = base64.b64encode(csv_b.encode()).decode()
@@ -220,7 +231,7 @@ if st.session_state["authentication_status"]:
 
     # --- TAB 6: PASSWORD ---
     with tabs[-1]:
-        st.subheader("🔑 Change Password")
+        st.subheader("🔑 Password")
         try:
             if authenticator.reset_password(username, 'Update'):
                 st.success('Password updated!')
@@ -229,4 +240,4 @@ if st.session_state["authentication_status"]:
 elif st.session_state["authentication_status"] is False:
     st.error('Incorrect Password')
 elif st.session_state["authentication_status"] is None:
-    st.warning('Please enter login details.')
+    st.warning('Please enter your login details.')
