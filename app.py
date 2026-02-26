@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta # Added timedelta for timezone fi
 import time
 
 # 1. Page Config
-st.set_page_config(page_title="Dressupht Intelligence", layout="wide")
+st.set_page_config(page_title="Dressupht Stock", layout="wide")
 
 # --- MOBILE OPTIMIZATION CSS ---
 st.markdown("""
@@ -158,7 +158,7 @@ if st.session_state["authentication_status"]:
                 time.sleep(1)
                 st.rerun()
 
-    st.title("🦱 Dressupht Intelligence")
+    st.title("DRESSUP HAITI STOCK SYSTEM")
     search = st.text_input("🔍 Search", placeholder="Wig name or SKU...")
 
     if curr_user == 'guest':
@@ -246,3 +246,4 @@ elif st.session_state["authentication_status"] is False:
     st.error("Username/password is incorrect")
 elif st.session_state["authentication_status"] is None:
     st.warning("Please enter your username and password")
+
