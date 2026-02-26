@@ -150,7 +150,7 @@ if st.session_state["authentication_status"]:
                 time.sleep(1)
                 st.rerun()
 
-    st.title("🦱 Dressupht Intelligence")
+    st.title("DRESSUP HAITI STOCK SYSTEM")
     search = st.text_input("🔍 Search", placeholder="Wig name or SKU...")
 
     if curr_user == 'guest':
@@ -238,4 +238,5 @@ if st.session_state["authentication_status"]:
 
 elif st.session_state["authentication_status"] is False:
     st.error("Login failed.")
+
 
