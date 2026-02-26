@@ -38,14 +38,9 @@ def get_at_data(table, base_id, headers):
     offset = None
     try:
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
-        
-        # --- PAGINATION LOOP: Fetch ALL records beyond the first 100 ---
         while True:
             params = {}
-            if offset:
-                params['offset'] = offset
-            
-            # Sorting logic
+            if offset: params['offset'] = offset
             if table in ["Shipments", "Inventory_Audit"]:
                 params['sort[0][field]'] = "Date"
                 params['sort[0][direction]'] = "desc"
@@ -54,28 +49,19 @@ def get_at_data(table, base_id, headers):
                 params['sort[0][direction]'] = "asc"
 
             res = requests.get(url, headers=headers, params=params)
-            if res.status_code != 200:
-                break
-                
+            if res.status_code != 200: break
             data = res.json()
             records = data.get('records', [])
             all_records.extend(records)
-            
-            # Check if there are more records to fetch
             offset = data.get('offset')
-            if not offset:
-                break
+            if not offset: break
         
         if not all_records: return pd.DataFrame()
-        
         df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_records])
-        
         if 'Date' in df.columns:
             temp_dt = pd.to_datetime(df['Date'], errors='coerce')
             df['Time'] = temp_dt.dt.strftime('%H:%M')
             df['Date'] = temp_dt.dt.date
-        if 'Last Updated' in df.columns:
-            df['Last Updated Display'] = pd.to_datetime(df['Last Updated']).dt.strftime('%m/%d %H:%M')
         return df
     except: return pd.DataFrame()
 
@@ -86,12 +72,9 @@ def clean_data(file, loc_col):
     existing = [c for c in list(df.columns) if c in needed.keys()]
     df = df[existing].copy()
     df.columns = [needed[c] for c in existing]
-    
     for col in ['Wig Name', 'Style']:
         if col in df.columns:
             df[col] = df[col].astype(str).str.replace('â€', '”', regex=False).str.replace('â€™', "'", regex=False).str.replace('â€œ', '“', regex=False)
-            
-    if 'Category' not in df.columns: df['Category'] = "Uncategorized"
     df['SKU'] = df['SKU'].astype(str).str.strip()
     df['Full Name'] = df['Wig Name'] + " (" + df['Style'].fillna('') + ")"
     df['Stock'] = pd.to_numeric(df['Stock'], errors='coerce').fillna(0)
@@ -155,65 +138,75 @@ if st.session_state["authentication_status"]:
 
     if curr_user == 'guest':
         tabs = st.tabs(["📋 Library"])
-    else:
-        tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📊 Sales", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "💰 Finance", "📋 Library"])
-
-    # --- TAB LOGIC ---
-    if curr_user == 'guest':
         with tabs[0]:
             data = get_at_data("Master_Inventory", BASE_ID, HEADERS)
             if not data.empty:
                 view = data[['Full Name', 'Stock', 'Last Updated Display']]
                 if search: view = view[view['Full Name'].str.contains(search, case=False)]
                 st.dataframe(view, use_container_width=True, hide_index=True)
-                st.caption(f"Showing {len(view)} wigs in inventory.")
             else: st.warning("Loading inventory...")
-
     else:
+        tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📊 Sales", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "💰 Finance", "📋 Library"])
+
         with tabs[0]: # Intake
             st.subheader("➕ New Stock Intake")
             with st.form("in_f", clear_on_submit=True):
                 i_sku = st.text_input("Scan SKU").strip()
                 q = st.number_input("Quantity Received", min_value=1, step=1)
-                if st.form_submit_button("Sync to Cloud", use_container_width=True):
+                if st.form_submit_button("Sync to Cloud"):
                     if i_sku:
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": i_sku, "Quantity": q, "User": curr_user}}]})
                         st.success("Logged!")
                         time.sleep(1)
                         st.rerun()
-            
-            st.write("### 🕒 Recent History")
             ships = get_at_data("Shipments", BASE_ID, HEADERS)
-            if not ships.empty:
-                st.dataframe(ships[['Date', 'Time', 'SKU', 'Quantity', 'User']], use_container_width=True, hide_index=True)
+            if not ships.empty: st.dataframe(ships[['Date', 'Time', 'SKU', 'Quantity', 'User']], use_container_width=True, hide_index=True)
 
-        with tabs[1]: # Audit
+        with tabs[1]: # --- FULLY UPDATED AUDIT TAB ---
             st.subheader("🕵️ Physical Count Audit")
+            if df_pv.empty: st.info("ℹ️ Upload 'THIS Saturday' file to calculate system discrepancies.")
+            
             with st.form("aud_f", clear_on_submit=True):
                 a_sku = st.text_input("Scan SKU to Audit").strip()
-                m = st.number_input("Manual Qty Found", min_value=0, step=1)
+                counter = st.selectbox("Who is counting?", ["Angelina", "David", "Annaelle", "Gerdine", "Kevin", "Darius", "Martilda", "Sebastien"])
+                col_a, col_b, col_c = st.columns(3)
+                m_qty = col_a.number_input("In Box/Stock", min_value=0, step=1)
+                e_qty = col_b.number_input("Exposed (Outside)", min_value=0, step=1)
+                r_qty = col_c.number_input("Returns", min_value=0, step=1)
+                
                 if st.form_submit_button("Log Audit Count", use_container_width=True):
                     if a_sku:
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Manual_Qty": m, "User": curr_user}}]})
-                        st.success("Audit Recorded!")
+                        total_phys = m_qty + e_qty + r_qty
+                        sys_stock = 0
+                        discrepancy = 0
+                        if not df_pv.empty:
+                            match = df_pv[df_pv['SKU'] == a_sku]
+                            if not match.empty:
+                                sys_stock = match.iloc[0]['Stock']
+                                discrepancy = total_phys - sys_stock
+
+                        payload = {"records": [{"fields": {
+                            "Date": datetime.now().isoformat(), "SKU": a_sku, "Counter_Name": counter,
+                            "Manual_Qty": m_qty, "Exposed_Qty": e_qty, "Returns_Qty": r_qty,
+                            "Total_Physical": total_phys, "System_Stock": int(sys_stock), "Discrepancy": int(discrepancy), "User": curr_user
+                        }}]}
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=payload)
+                        st.success(f"Recorded! Discrepancy: {discrepancy}")
                         time.sleep(1)
                         st.rerun()
             
-            st.write("### 📝 Recent Audits")
             auds = get_at_data("Inventory_Audit", BASE_ID, HEADERS)
             if not auds.empty:
-                st.dataframe(auds[['Date', 'Time', 'SKU', 'Manual_Qty', 'User']], use_container_width=True, hide_index=True)
+                st.dataframe(auds[['Date', 'SKU', 'Counter_Name', 'System_Stock', 'Total_Physical', 'Discrepancy']], use_container_width=True, hide_index=True)
 
         with tabs[2]: # Sales
-            if sales_ready:
-                st.dataframe(df_pv[df_pv['Sold'] > 0][['Full Name', 'SKU', 'Stock_prev', 'Stock', 'Sold']], use_container_width=True, hide_index=True)
+            if sales_ready: st.dataframe(df_pv[df_pv['Sold'] > 0][['Full Name', 'SKU', 'Stock_prev', 'Stock', 'Sold']], use_container_width=True, hide_index=True)
             else: st.info("Upload THIS and LAST Saturday files.")
 
         with tabs[3]: # Compare
             if haiti_ready and not df_pv.empty:
                 comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv[['SKU', 'Full Name', 'Stock']], on='SKU', suffixes=('_haiti', '_pv'))
                 st.dataframe(comp, use_container_width=True, hide_index=True)
-            else: st.info("Upload Haiti and PV files.")
 
         with tabs[4]: # Transfers
             if haiti_ready and not df_pv.empty:
