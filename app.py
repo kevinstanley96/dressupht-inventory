@@ -1,27 +1,19 @@
 import streamlit as st
-import pandas as pd  # Fixed the import typo here
+import pandas as pd
 import requests
 import streamlit_authenticator as stauth
 from datetime import datetime, date
 import time
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.7.1", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.8", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
 credentials['usernames']['Kevin']['password'] = "The$100$Raven"
 
-# Initialize Authenticator
-authenticator = stauth.Authenticate(
-    credentials, 
-    "inventory_cookie", 
-    "abcdef123456_key", 
-    30
-)
-
-# Render Login
+authenticator = stauth.Authenticate(credentials, "inventory_cookie", "abcdef123456_key", 30)
 name, authentication_status, username = authenticator.login(location='main')
 
 if st.session_state["authentication_status"]:
@@ -33,29 +25,43 @@ if st.session_state["authentication_status"]:
         BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
-        st.error("Missing Secrets in Streamlit Cloud!")
+        st.error("Missing Secrets!")
         st.stop()
 
-    # --- DATA ENGINE ---
-    def get_at_data(table, params=None):
-        all_recs = []
+    # --- DATA ENGINE (REINFORCED PAGINATION) ---
+    def get_at_data(table):
+        all_records = []
+        offset = None
         url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
-        if params is None: params = {}
+        
         while True:
-            res = requests.get(url, headers=HEADERS, params=params)
-            if res.status_code == 200:
-                data = res.json()
-                all_recs.extend(data.get('records', []))
+            params = {"offset": offset} if offset else {}
+            response = requests.get(url, headers=HEADERS, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                records = data.get('records', [])
+                for r in records:
+                    row = r['fields']
+                    row['id'] = r['id']
+                    all_records.append(row)
+                
                 offset = data.get('offset')
-                if offset: params['offset'] = offset
-                else: break
-            else: break
-        if not all_recs: return pd.DataFrame()
-        df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_recs])
+                if not offset:
+                    break
+            else:
+                break
+        
+        df = pd.DataFrame(all_records)
+        if df.empty:
+            return pd.DataFrame(columns=['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price'])
+        
+        # Ensure mandatory columns
         for col in ['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']:
             if col not in df.columns: df[col] = "N/A"
         return df
 
+    # --- CLEANING LOGIC ---
     def clean_location_data(file, loc_name):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip() for c in df.columns]
@@ -73,93 +79,76 @@ if st.session_state["authentication_status"]:
         df['Full Name'] = w_name + " (" + s_name + ")"
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
         
-        return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']].copy()
+        return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']]
 
-    # --- USER CONTEXT ---
-    user_data = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{username}'"})
-    user_role = "Admin" if username == "Kevin" else (user_data['Access Level'].iloc[0] if not user_data.empty else 'Staff')
-    user_location = user_data['Assigned Location'].iloc[0] if not user_data.empty and 'Assigned Location' in user_data.columns else 'Both'
+    # --- ROLES ---
+    roles_df = get_at_data("Role")
+    user_row = roles_df[roles_df['User Name'] == username] if not roles_df.empty else pd.DataFrame()
+    user_role = "Admin" if username == "Kevin" else (user_row['Access Level'].iloc[0] if not user_row.empty else "Staff")
+    user_location = user_row['Assigned Location'].iloc[0] if not user_row.empty and 'Assigned Location' in user_row.columns else "Both"
 
-    st.sidebar.markdown(f"### 👤 {username} | 📍 {user_location}")
-    st.sidebar.divider()
+    st.sidebar.info(f"👤 {username} | 📍 {user_location}")
 
     tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "🛡️ Admin", "🔑 Password"])
 
-    # --- TAB 1: LIBRARY (SORTING BY NAME) ---
-    lib_data = get_at_data("Master_Inventory")
+    # --- TAB 1: LIBRARY ---
     with tabs[0]:
-        st.subheader("📦 Master Inventory")
+        lib_data = get_at_data("Master_Inventory")
+        st.subheader(f"📦 Master Inventory ({len(lib_data)} items found)")
+        
         if not lib_data.empty:
-            # Applying your saved preference: Sort by Name (A-Z)
             disp_df = lib_data.copy().sort_values(by="Full Name", ascending=True)
             
             if user_role not in ['Admin', 'Manager'] and user_location != "Both":
                 disp_df = disp_df[disp_df['Location'] == user_location]
             
             c1, c2, c3 = st.columns([2, 1, 1])
-            search = c1.text_input("🔍 Search Library")
+            search = c1.text_input("🔍 Search")
+            sort_choice = c2.selectbox("Sort By", ["Name", "Category", "Date Entered"])
             
-            # Additional sort options per your saved request
-            sort_choice = c2.selectbox("Change Sort", ["Name", "Category", "Date Entered"])
-            if sort_choice == "Category":
-                disp_df = disp_df.sort_values(by=["Category", "Full Name"])
-            elif sort_choice == "Date Entered":
-                disp_df = disp_df.sort_values(by="id", ascending=False) # Recent records first
-
+            if sort_choice == "Category": disp_df = disp_df.sort_values(by="Category")
             if search:
                 disp_df = disp_df[disp_df['Full Name'].str.contains(search, case=False, na=False) | disp_df['SKU'].str.contains(search, na=False)]
             
             st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
-    # --- TAB 5: ADMIN (THE FULL SYNC LOGIC) ---
+    # --- TAB 5: ADMIN (SYNC) ---
     if user_role == 'Admin':
         with tabs[4]:
-            st.subheader("🛡️ Master System Sync")
-            col_pv, col_ht = st.columns(2)
-            f_pv = col_pv.file_uploader("Upload PV File", type=['xlsx'])
-            f_ht = col_ht.file_uploader("Upload Haiti File", type=['xlsx'])
+            st.subheader("🛡️ Master Sync")
+            f_pv = st.file_uploader("Upload PV", type=['xlsx'])
+            f_ht = st.file_uploader("Upload Haiti", type=['xlsx'])
             
             if f_pv and f_ht:
-                df_pv = clean_location_data(f_pv, "Pv")
-                df_ht = clean_location_data(f_ht, "Haiti")
-                full_df = pd.concat([df_pv, df_ht]).reset_index(drop=True)
-                
-                st.info(f"Detected {len(full_df)} total items.")
-                
-                if st.button("🚀 Wipe & Sync ALL Items"):
-                    if not lib_data.empty:
-                        status = st.empty()
-                        ids = lib_data['id'].tolist()
+                if st.button("🚀 Wipe & Full Sync (755 Items)"):
+                    df_pv = clean_location_data(f_pv, "Pv")
+                    df_ht = clean_location_data(f_ht, "Haiti")
+                    full_df = pd.concat([df_pv, df_ht]).reset_index(drop=True)
+                    
+                    # Wipe
+                    old_data = get_at_data("Master_Inventory")
+                    if not old_data.empty:
+                        st.write("🗑️ Deleting old records...")
+                        ids = old_data['id'].tolist()
                         for i in range(0, len(ids), 10):
-                            batch_ids = ids[i:i+10]
-                            query = "&".join([f"records[]={rid}" for rid in batch_ids])
-                            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{query}", headers=HEADERS)
-                            status.text(f"🗑️ Deleting: {i}/{len(ids)}")
+                            batch = ids[i:i+10]
+                            q = "&".join([f"records[]={rid}" for rid in batch])
+                            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{q}", headers=HEADERS)
                     
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
+                    # Upload
+                    st.write(f"🚀 Uploading {len(full_df)} records...")
+                    prog = st.progress(0)
                     for i in range(0, len(full_df), 10):
-                        chunk = full_df.iloc[i : i + 10]
+                        chunk = full_df.iloc[i:i+10]
                         recs = [{"fields": {
                             "SKU": str(r['SKU']), "Full Name": str(r['Full Name']),
                             "Stock": int(r['Stock']), "Price": float(r['Price']),
-                            "Category": str(r['Category']), "Location": str(r['Location']),
-                            "Last_Sync_Date": str(date.today())
+                            "Category": str(r['Category']), "Location": str(r['Location'])
                         }} for _, r in chunk.iterrows()]
-                        
-                        res = requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
-                        
-                        progress_bar.progress(min((i + 10) / len(full_df), 1.0))
-                        status_text.text(f"🚀 Uploading: {min(i+10, len(full_df))} / {len(full_df)}")
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
+                        prog.progress(min((i + 10) / len(full_df), 1.0))
                         time.sleep(0.2)
-                    
-                    st.success("✅ Sync Complete!")
+                    st.success("Sync Complete!")
                     st.rerun()
 
-    # --- TABS 2 (Intake) and Password (Last Tab) logic remain the same ---
-
-elif st.session_state["authentication_status"] is False:
-    st.error('Username/password is incorrect')
-elif st.session_state["authentication_status"] is None:
-    st.warning('Please enter your username and password')
+elif authentication_status is False: st.error("Wrong Login")
