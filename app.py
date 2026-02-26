@@ -7,7 +7,7 @@ import time
 import base64
 
 # --- CONFIG & INITIALIZATION ---
-st.set_page_config(page_title="Dressupht ERP v3.3", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v3.4", layout="wide")
 
 REPO_NAME = "kevin/dressupht-inventory" 
 
@@ -36,7 +36,7 @@ if st.session_state["authentication_status"]:
         st.error("Missing Secrets!")
         st.stop()
 
-    # --- HELPER: PAGINATION (Gets all 400+ Rows) ---
+    # --- HELPER: PAGINATION ---
     def get_at_data(table, params=None):
         all_recs = []
         url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
@@ -51,7 +51,12 @@ if st.session_state["authentication_status"]:
                 else: break
             else: break
         if not all_recs: return pd.DataFrame()
-        return pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_recs])
+        df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_recs])
+        
+        # 🔥 CRASH PROTECTION: Ensure mandatory columns exist
+        for col in ['Category', 'Full Name', 'SKU', 'Stock', 'Price', 'Last_Sync_Date']:
+            if col not in df.columns: df[col] = "N/A"
+        return df
 
     def get_user_role(user):
         df = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{user}'"})
@@ -80,9 +85,9 @@ if st.session_state["authentication_status"]:
 
     # --- TABS ---
     if user_role == 'Admin':
-        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "🛡️ Admin", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "📊 Sales", "🛡️ Admin", "🔑 Password"])
     elif user_role == 'Manager':
-        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "📊 Sales", "🔑 Password"])
     else:
         tabs = st.tabs(["📋 Library", "🕵️ Audit", "🔑 Password"])
 
@@ -112,23 +117,27 @@ if st.session_state["authentication_status"]:
             st.sidebar.success("Database Updated!")
             st.rerun()
 
-    # --- TAB 1: LIBRARY (SORT BY NAME DEFAULT) ---
+    # --- TAB 1: LIBRARY (WITH KEYERROR PROTECTION) ---
     with tabs[0]:
         st.subheader("📦 Master Inventory")
         lib_data = get_at_data("Master_Inventory")
         if not lib_data.empty:
             c1, c2, c3 = st.columns([2, 1, 1])
             search = c1.text_input("🔍 Search Name or SKU")
-            cat_list = ["All"] + sorted(lib_data['Category'].dropna().unique().tolist())
+            
+            # Safe list generation
+            cat_options = lib_data['Category'].fillna("Uncategorized").unique().tolist()
+            cat_list = ["All"] + sorted([str(x) for x in cat_options])
             selected_cat = c2.selectbox("Filter Category", cat_list)
             sort_option = c3.selectbox("Sort By", ["Name (A-Z)", "Category", "Date Sync"])
 
             filtered_df = lib_data.copy()
             if search:
-                filtered_df = filtered_df[filtered_df['Full Name'].str.contains(search, case=False) | filtered_df['SKU'].str.contains(search)]
+                filtered_df = filtered_df[filtered_df['Full Name'].str.contains(search, case=False, na=False) | filtered_df['SKU'].str.contains(search, na=False)]
             if selected_cat != "All":
                 filtered_df = filtered_df[filtered_df['Category'] == selected_cat]
 
+            # Sorting Logic
             if sort_option == "Name (A-Z)":
                 filtered_df = filtered_df.sort_values(by="Full Name", ascending=True)
             elif sort_option == "Category":
@@ -139,10 +148,9 @@ if st.session_state["authentication_status"]:
             st.dataframe(filtered_df[['Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
         else: st.warning("No data found.")
 
-    # --- TAB 2: INTAKE (RESTORED) ---
-    intake_idx = 1 if user_role in ['Admin', 'Manager'] else None
-    if intake_idx:
-        with tabs[intake_idx]:
+    # --- TAB 2: INTAKE ---
+    if user_role in ['Admin', 'Manager']:
+        with tabs[1]:
             st.subheader("➕ New Stock Shipment")
             with st.form("intake_form"):
                 i_sku = st.text_input("Scan/Enter SKU").strip()
@@ -152,7 +160,7 @@ if st.session_state["authentication_status"]:
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=ship_payload)
                     st.success("Shipment Logged!")
 
-    # --- TAB 3: AUDIT (BIG DEPOT + DAMAGED RESTORED) ---
+    # --- TAB 3: AUDIT ---
     audit_idx = 2 if user_role in ['Admin', 'Manager'] else 1
     with tabs[audit_idx]:
         st.subheader("🕵️ Physical Inventory Audit")
@@ -183,9 +191,9 @@ if st.session_state["authentication_status"]:
                 comp = pd.merge(lib_data[['SKU', 'Full Name', 'Stock', 'Category']], df_h[['SKU', 'Stock']], on='SKU', suffixes=('_PV', '_Haiti'))
                 st.dataframe(comp, use_container_width=True, hide_index=True)
 
-    # --- TAB 5: ADMIN & GITHUB (RESTORED) ---
+    # --- TAB 5: ADMIN & GITHUB ---
     if user_role == 'Admin':
-        with tabs[4]:
+        with tabs[5]:
             st.subheader("🛡️ Admin Panel")
             if st.button("📤 Push Backup to GitHub"):
                 if not lib_data.empty:
@@ -194,8 +202,7 @@ if st.session_state["authentication_status"]:
                     url = f"https://api.github.com/repos/{REPO_NAME}/contents/backups/erp_{date.today()}.csv"
                     gh_h = {"Authorization": f"token {st.secrets['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
                     res = requests.put(url, headers=gh_h, json={"message": f"Backup {date.today()}", "content": b64})
-                    if res.status_code in [200, 201]: st.success("Backup Saved to GitHub!")
-                    else: st.error("GitHub Error Check Secrets")
+                    if res.status_code in [200, 201]: st.success("Backup Saved!")
 
     # --- TAB 6: PASSWORD ---
     with tabs[-1]:
