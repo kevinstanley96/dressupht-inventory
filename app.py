@@ -4,159 +4,167 @@ import requests
 import streamlit_authenticator as stauth
 from datetime import datetime, date
 import time
+import base64
 
-# 1. Page Config
-st.set_page_config(page_title="Dressupht ERP", layout="wide")
+# --- CONFIG & INITIALIZATION ---
+st.set_page_config(page_title="Dressupht ERP v2.1", layout="wide")
 
-# --- AUTHENTICATION CONFIG ---
+# ⚠️ UPDATE THIS TO YOUR REPO (Format: "username/repo-name")
+REPO_NAME = "kevinstanley96/dressupht-inventory" 
+
+# --- AUTHENTICATION ---
 usernames_list = [
     "Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada",
     "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", 
     "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", 
     "Gerdine", "Martilda"
 ]
-
-# Initialize credentials with temporary passwords
-credentials = {
-    "usernames": {
-        u: {"name": u, "password": "temppassword123"} for u in usernames_list
-    }
-}
-# Admin Override
+credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
 credentials['usernames']['Kevin']['password'] = "The$100$Raven"
 
-# Correct 0.3.1 Initialization
-authenticator = stauth.Authenticate(
-    credentials, 
-    "inventory_cookie", 
-    "abcdef123456_key", # Secure signature key
-    30
-)
-
-# --- LOGIN INTERFACE ---
-# Fix for ValueError/TypeError: location must be a keyword argument
+authenticator = stauth.Authenticate(credentials, "inventory_cookie", "abcdef123456_key", 30)
 authentication_status = authenticator.login(location='main')
 
 if st.session_state["authentication_status"]:
     username = st.session_state["username"]
     authenticator.logout('Logout', 'sidebar')
 
-    # 2. API SETUP
+    # API KEYS
     try:
         AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
         BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
-        st.error("Missing Airtable Secrets in Streamlit Cloud!")
+        st.error("Missing Secrets!")
         st.stop()
 
-    # --- HELPER: GET USER ROLE ---
+    # --- HELPER FUNCTIONS ---
+    def get_at_data(table, params=None):
+        url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
+        res = requests.get(url, headers=HEADERS, params=params)
+        if res.status_code == 200:
+            recs = res.json().get('records', [])
+            return pd.DataFrame([dict(r['fields'], id=r['id']) for r in recs])
+        return pd.DataFrame()
+
     def get_user_role(user):
-        try:
-            url = f"https://api.airtable.com/v0/{BASE_ID}/Role"
-            params = {"filterByFormula": f"{{User Name}}='{user}'"}
-            res = requests.get(url, headers=HEADERS, params=params)
-            if res.status_code == 200:
-                recs = res.json().get('records', [])
-                if recs:
-                    return recs[0]['fields'].get('Access Level', 'Staff')
-            return 'Staff'
-        except: return 'Staff'
+        df = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{user}'"})
+        return df['Access Level'].iloc[0] if not df.empty else 'Staff'
 
-    user_role = get_user_role(username)
-    st.sidebar.success(f"Welcome, {username}")
-    st.sidebar.info(f"Role: {user_role}")
-
-    # --- DATA LOADING HELPERS ---
     def clean_data(file):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip().lower() for c in df.columns]
-        # Mapping for Square Export
         mapping = {'item name': 'Wig Name', 'variation name': 'Style', 'sku': 'SKU', 'price': 'Price'}
         df = df.rename(columns=mapping)
         df['SKU'] = df['SKU'].astype(str).str.strip()
         df['Full Name'] = df['Wig Name'] + " (" + df['Style'].fillna('') + ")"
+        df['Stock'] = pd.to_numeric(df['current quantity dressupht pv'], errors='coerce').fillna(0)
         return df
 
-    # --- DYNAMIC TABS BASED ON ROLE ---
+    user_role = get_user_role(username)
+    st.sidebar.info(f"User: {username} | Role: {user_role}")
+
+    # --- TABS ---
     if user_role == 'Admin':
-        tabs = st.tabs(["📋 Library", "🕵️ Audit", "➕ Intake", "📊 Sales", "💰 Finance", "🛡️ Roles", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "🕵️ Audit", "➕ Intake", "📊 Sales", "💰 Finance", "🛡️ Admin", "🔑 Password"])
     elif user_role == 'Manager':
         tabs = st.tabs(["📋 Library", "🕵️ Audit", "➕ Intake", "🔑 Password"])
     else:
         tabs = st.tabs(["📋 Library", "🔑 Password"])
 
-    # --- TAB 1: LIBRARY (Visible to All) ---
-    with tabs[0]:
-        st.subheader("📦 Master Inventory")
-        # Global Search
-        search = st.text_input("🔍 Search Wig or SKU")
-        # Note: In production, fetch from Airtable Master_Inventory table here
-        st.info("Upload current data in the sidebar to populate this view.")
+    # --- SIDEBAR: DATA SYNC (Admin Only) ---
+    if user_role == 'Admin':
+        st.sidebar.divider()
+        f_pv = st.sidebar.file_uploader("Upload Square Export", type=['xlsx'])
+        sync_date = st.sidebar.date_input("Sync Date", date.today())
+        if f_pv and st.sidebar.button("🚀 Sync to Cloud"):
+            df_new = clean_data(f_pv)
+            with st.spinner("Syncing..."):
+                for i in range(0, len(df_new), 10):
+                    batch = df_new.iloc[i:i+10]
+                    recs = [{"fields": {"SKU": str(r['SKU']), "Full Name": str(r['Full Name']), "Stock": int(r['Stock']), "Price": float(r['Price']), "Last_Sync_Date": str(sync_date)}} for _, r in batch.iterrows()]
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
+            st.sidebar.success("Master Inventory Updated!")
 
-    # --- TAB 2: AUDIT (Admin & Manager Only) ---
+    # --- TAB: LIBRARY ---
+    with tabs[0]:
+        st.subheader("📦 Inventory Search")
+        lib_data = get_at_data("Master_Inventory")
+        search = st.text_input("🔍 Search Name or SKU")
+        if not lib_data.empty:
+            if search: lib_data = lib_data[lib_data['Full Name'].str.contains(search, case=False) | lib_data['SKU'].str.contains(search)]
+            st.dataframe(lib_data[['Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
+
+    # --- TAB: AUDIT ---
     if user_role in ['Admin', 'Manager']:
         with tabs[1]:
-            st.subheader("🕵️ Physical Inventory Audit")
-            a_sku = st.text_input("Scan SKU to Audit", placeholder="Enter or scan SKU...").strip()
+            st.subheader("🕵️ Physical Audit")
+            a_sku = st.text_input("Scan SKU").strip()
+            # Name Lookup
+            if a_sku and not lib_data.empty:
+                match = lib_data[lib_data['SKU'] == a_sku]
+                if not match.empty: st.success(f"Found: {match.iloc[0]['Full Name']}")
             
-            with st.form("audit_form"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    m_qty = st.number_input("In Box/Shelf (Max 50)", min_value=0, step=1)
-                    e_qty = st.number_input("Exposed (Outside)", min_value=0, step=1)
-                with col2:
-                    b_qty = st.number_input("Big Depot Storage", min_value=0, step=1)
-                    r_qty = st.number_input("Returns", min_value=0, step=1)
+            with st.form("audit_v2"):
+                c1, c2 = st.columns(2)
+                m_q = c1.number_input("In Box (Shelf)", min_value=0)
+                b_q = c2.number_input("Big Depot Storage", min_value=0)
+                e_q = c1.number_input("Exposed (Outside)", min_value=0)
+                r_q = c2.number_input("Returns", min_value=0)
+                reason = st.selectbox("Reason for Returns", ["N/A", "Damaged", "Exchange", "Credit Refund"])
                 
-                reason = st.selectbox("Return Reason (if any)", ["N/A", "Damaged", "Exchange", "Credit Refund"])
-                
-                if st.form_submit_button("Submit Audit"):
-                    total_phys = m_qty + e_qty + b_qty + r_qty
+                if st.form_submit_button("Submit"):
+                    total = m_q + b_q + e_q + r_q
+                    sys_s = lib_data[lib_data['SKU'] == a_sku]['Stock'].iloc[0] if a_sku in lib_data['SKU'].values else 0
                     
-                    # 1. Log to Audit Table
-                    audit_data = {
-                        "records": [{"fields": {
-                            "Date": datetime.now().isoformat(),
-                            "SKU": a_sku,
-                            "Counter_Name": username,
-                            "Manual_Qty": m_qty,
-                            "Exposed_Qty": e_qty,
-                            "Big_Depot_Qty": b_qty,
-                            "Returns_Qty": r_qty,
-                            "Total_Physical": total_phys,
-                            "User": username
-                        }}]
-                    }
-                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=audit_data)
+                    # Log Audit
+                    audit_fields = {"Date": datetime.now().isoformat(), "SKU": a_sku, "Counter_Name": username, "Manual_Qty": m_q, "Big_Depot_Qty": b_q, "Exposed_Qty": e_q, "Returns_Qty": r_q, "Total_Physical": total, "System_Stock": int(sys_s), "Discrepancy": int(total-sys_s)}
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": audit_fields}]})
                     
-                    # 2. Log Damaged separately if needed
-                    if reason == "Damaged" and r_qty > 0:
-                        dmg_data = {
-                            "records": [{"fields": {
-                                "Date": datetime.now().isoformat(),
-                                "SKU": a_sku,
-                                "Quantity": r_qty,
-                                "Reason": "Damaged",
-                                "User": username
-                            }}]
-                        }
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Damaged_Stock", headers=HEADERS, json=dmg_data)
-                        st.warning(f"Logged {r_qty} units as DAMAGED.")
+                    if reason == "Damaged" and r_q > 0:
+                        dmg_fields = {"Date": datetime.now().isoformat(), "SKU": a_sku, "Quantity": r_q, "Reason": "Damaged", "User": username}
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Damaged_Stock", headers=HEADERS, json={"records": [{"fields": dmg_fields}]})
+                    st.balloons()
+                    st.success("Log Saved!")
 
-                    st.success(f"Audit Saved! Total Physical Count: {total_phys}")
+    # --- TAB: ADMIN (ROLES & BACKUP) ---
+    if user_role == 'Admin':
+        with tabs[5]:
+            st.subheader("🛡️ Admin Controls")
+            # 1. Role Management
+            roles_df = get_at_data("Role")
+            if not roles_df.empty:
+                st.write("### Permissions")
+                st.dataframe(roles_df[['User Name', 'Access Level']], hide_index=True)
+                with st.expander("Update User Role"):
+                    u_to_upd = st.selectbox("User", roles_df['User Name'])
+                    n_role = st.selectbox("Role", ["Admin", "Manager", "Staff"])
+                    if st.button("Change Role"):
+                        r_id = roles_df[roles_df['User Name'] == u_to_upd]['id'].iloc[0]
+                        requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Role", headers=HEADERS, json={"records": [{"id": r_id, "fields": {"Access Level": n_role}}]})
+                        st.rerun()
 
-    # --- LAST TAB: PASSWORD RESET ---
+            st.divider()
+            # 2. GitHub Backup
+            st.write("### System Backup")
+            if st.button("📤 Push CSV Backup to GitHub"):
+                csv_data = lib_data.to_csv(index=False)
+                b64 = base64.b64encode(csv_data.encode()).decode()
+                url = f"https://api.github.com/repos/{REPO_NAME}/contents/backups/inventory_{date.today()}.csv"
+                gh_headers = {"Authorization": f"token {st.secrets['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+                gh_res = requests.put(url, headers=gh_headers, json={"message": f"Backup {date.today()}", "content": b64})
+                if gh_res.status_code in [200, 201]: st.success("Backup Saved to GitHub!")
+                else: st.error(f"GitHub Error: {gh_res.text}")
+
+    # --- TAB: PASSWORD ---
     with tabs[-1]:
-        st.subheader("🔑 Change Your Password")
+        st.subheader("🔑 Security")
         try:
-            if authenticator.reset_password(username, 'Reset Password'):
-                st.success('Password changed successfully!')
-        except Exception as e:
-            st.error(f"Error: {e}")
+            if authenticator.reset_password(username, 'Change Password'):
+                st.success('Password changed!')
+        except Exception as e: st.error(e)
 
-# --- LOGIN HANDLING ---
 elif st.session_state["authentication_status"] is False:
-    st.error('Username/password is incorrect')
+    st.error('Incorrect Password')
 elif st.session_state["authentication_status"] is None:
-    st.warning('Please enter your username and password')
+    st.warning('Please login')
