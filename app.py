@@ -9,6 +9,7 @@ import base64
 # --- CONFIG & INITIALIZATION ---
 st.set_page_config(page_title="Dressupht ERP v2.5", layout="wide")
 
+# ⚠️ UPDATE THIS TO YOUR REPO (Format: "username/repo-name")
 REPO_NAME = "kevin/dressupht-inventory" 
 
 # --- AUTHENTICATION ---
@@ -28,8 +29,9 @@ if st.session_state["authentication_status"]:
     username = st.session_state["username"]
     authenticator.logout('Logout', 'sidebar')
 
+    # API KEYS
     try:
-        AIR_TOKEN = st.secrets["AIRTOKEN"] if "AIRTOKEN" in st.secrets else st.secrets["AIRTABLE_TOKEN"]
+        AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
         BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
@@ -46,86 +48,76 @@ if st.session_state["authentication_status"]:
             return pd.DataFrame([dict(r['fields'], id=r['id']) for r in recs])
         return pd.DataFrame()
 
+    def get_user_role(user):
+        df = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{user}'"})
+        return df['Access Level'].iloc[0] if not df.empty else 'Staff'
+
     def delete_at_records(table, df):
         if df.empty: return
         ids = df['id'].tolist()
-        st.info(f"Clearing {len(ids)} old records...")
+        st.info(f"Clearing {len(ids)} old records to prevent duplicates...")
         for i in range(0, len(ids), 10):
             batch = ids[i:i+10]
-            query = "&".join([f"records[]={id}" for id in batch])
+            query = "&".join([f"records[]={rid}" for rid in batch])
             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/{table}?{query}", headers=HEADERS)
-            time.sleep(0.2)
+            time.sleep(0.2) # Avoid Rate Limit
 
     def clean_data(file, loc_col_name="current quantity dressupht pv"):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip().lower() for c in df.columns]
         mapping = {'item name': 'Wig Name', 'variation name': 'Style', 'sku': 'SKU', 'price': 'Price'}
         df = df.rename(columns=mapping)
-        
         df['SKU'] = df['SKU'].astype(str).str.strip().replace('nan', 'NO_SKU')
-        df['Wig Name'] = df['Wig Name'].astype(str).str.strip().replace('nan', 'Unknown')
-        df['Style'] = df['Style'].astype(str).str.strip().replace('nan', '')
-        df['Full Name'] = df['Wig Name'] + " (" + df['Style'] + ")"
+        df['Full Name'] = df['Wig Name'].astype(str) + " (" + df['Style'].astype(str).replace('nan', '') + ")"
         
-        # Numeric cleanup
         if loc_col_name in df.columns:
             df['Stock'] = pd.to_numeric(df[loc_col_name], errors='coerce').fillna(0).astype(int)
         else:
             stock_cols = [c for c in df.columns if 'quantity' in c]
             df['Stock'] = pd.to_numeric(df[stock_cols[0]], errors='coerce').fillna(0).astype(int) if stock_cols else 0
-        
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0.0)
         return df
 
-    # --- USER ROLE ---
-    user_role = get_user_role(username) if 'get_user_role' in locals() else "Staff"
-    # Manual bypass for first-time setup if Role table is empty
-    if username == "Kevin": user_role = "Admin" 
-
+    user_role = get_user_role(username)
+    # Admin Override for Setup
+    if username == "Kevin": user_role = "Admin"
     st.sidebar.info(f"User: {username} | Role: {user_role}")
 
-    # --- TABS ---
+    # --- DYNAMIC TABS ---
     if user_role == 'Admin':
-        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "🛡️ Admin", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "📊 Sales", "🛡️ Admin", "🔑 Password"])
+    elif user_role == 'Manager':
+        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔑 Password"])
     else:
-        tabs = st.tabs(["📋 Library", "🕵️ Audit", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "🔑 Password"])
 
-    # --- SIDEBAR: DATA SYNC (v2.5) ---
+    # --- SIDEBAR: SYNC (Wipe & Upload) ---
     if user_role == 'Admin':
         st.sidebar.divider()
-        st.sidebar.subheader("☁️ Sync Square Data")
         f_pv = st.sidebar.file_uploader("Upload PV Square Export", type=['xlsx'])
         sync_date = st.sidebar.date_input("Sync Date", date.today())
         
         if f_pv and st.sidebar.button("🚀 Wipe & Sync to Cloud"):
             df_new = clean_data(f_pv)
-            
-            # 1. Clear existing data first
+            # 1. Clear Old Data
             existing_df = get_at_data("Master_Inventory")
-            if not existing_df.empty:
-                delete_at_records("Master_Inventory", existing_df)
+            delete_at_records("Master_Inventory", existing_df)
             
-            # 2. Upload new data
+            # 2. Upload 400+ Rows in Batches
             total = len(df_new)
             bar = st.sidebar.progress(0)
-            with st.spinner(f"Uploading {total} items..."):
+            with st.spinner(f"Syncing {total} items..."):
                 for i in range(0, total, 10):
                     batch = df_new.iloc[i:i+10]
-                    recs = []
-                    for _, r in batch.iterrows():
-                        recs.append({"fields": {
-                            "SKU": str(r['SKU']), 
-                            "Full Name": str(r['Full Name']), 
-                            "Stock": int(r['Stock']), 
-                            "Price": float(r['Price']), 
-                            "Last_Sync_Date": str(sync_date)
-                        }})
+                    recs = [{"fields": {
+                        "SKU": str(r['SKU']), "Full Name": str(r['Full Name']), 
+                        "Stock": int(r['Stock']), "Price": float(r['Price']), 
+                        "Last_Sync_Date": str(sync_date)
+                    }} for _, r in batch.iterrows()]
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
                     bar.progress(min((i + 10) / total, 1.0))
-                    time.sleep(0.25)
-            
-            st.sidebar.success("Sync Complete!")
-            time.sleep(1)
+                    time.sleep(0.2)
+            st.sidebar.success("Cloud Updated!")
             st.rerun()
 
     # --- TAB 1: LIBRARY ---
@@ -134,55 +126,72 @@ if st.session_state["authentication_status"]:
         lib_data = get_at_data("Master_Inventory")
         search = st.text_input("🔍 Search Name or SKU")
         if not lib_data.empty:
-            if search: 
-                lib_data = lib_data[lib_data['Full Name'].str.contains(search, case=False) | lib_data['SKU'].str.contains(search)]
+            if search: lib_data = lib_data[lib_data['Full Name'].str.contains(search, case=False) | lib_data['SKU'].str.contains(search)]
             st.dataframe(lib_data[['Full Name', 'SKU', 'Stock', 'Price', 'Last_Sync_Date']], use_container_width=True, hide_index=True)
-        else:
-            st.warning("No data found in Cloud. Please upload a file in the sidebar.")
+        else: st.warning("Cloud is empty. Please Sync data in the sidebar.")
 
-    # --- TAB 3: AUDIT (BIG DEPOT LOGIC) ---
-    # (Audit code remains consolidated here...)
-    with tabs[2] if user_role == 'Admin' else tabs[1]:
-        st.subheader("🕵️ Physical Inventory Audit")
-        a_sku = st.text_input("Scan SKU to Audit").strip()
-        with st.form("audit_v2_5"):
-            c1, c2 = st.columns(2)
-            m_q = c1.number_input("Shelf (Max 50)", min_value=0)
-            b_q = c2.number_input("Big Depot Storage", min_value=0)
-            e_q = c1.number_input("Exposed", min_value=0)
-            r_q = c2.number_input("Returns", min_value=0)
-            
-            if st.form_submit_button("Submit Audit"):
-                total_phys = m_q + b_q + e_q + r_q
-                audit_payload = {"records": [{"fields": {
-                    "Date": datetime.now().isoformat(), "SKU": a_sku, "Counter_Name": username,
-                    "Manual_Qty": m_q, "Big_Depot_Qty": b_q, "Exposed_Qty": e_q, "Returns_Qty": r_q,
-                    "Total_Physical": total_phys, "User": username
-                }}]}
-                requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=audit_payload)
-                st.success(f"Audit Logged. Total: {total_phys}")
+    # --- TAB: AUDIT (BIG DEPOT + DAMAGED) ---
+    audit_tab_idx = 2 if user_role == 'Admin' else (2 if user_role == 'Manager' else None)
+    if audit_tab_idx:
+        with tabs[audit_tab_idx]:
+            st.subheader("🕵️ Physical Inventory Audit")
+            a_sku = st.text_input("Scan SKU to Audit", key="aud_sku").strip()
+            with st.form("audit_v2_5"):
+                c1, c2 = st.columns(2)
+                m_q = c1.number_input("Shelf (Max 50)", min_value=0)
+                b_q = c2.number_input("Big Depot Storage", min_value=0)
+                e_q = c1.number_input("Exposed", min_value=0)
+                r_q = c2.number_input("Returns", min_value=0)
+                reason = st.selectbox("Reason for returns", ["N/A", "Damaged", "Exchange", "Credit Refund"])
+                
+                if st.form_submit_button("Submit Audit"):
+                    total_phys = m_q + b_q + e_q + r_q
+                    # Get system stock for discrepancy
+                    sys_s = lib_data[lib_data['SKU'] == a_sku]['Stock'].iloc[0] if not lib_data.empty and a_sku in lib_data['SKU'].values else 0
+                    
+                    audit_payload = {"records": [{"fields": {
+                        "Date": datetime.now().isoformat(), "SKU": a_sku, "Counter_Name": username,
+                        "Manual_Qty": m_q, "Big_Depot_Qty": b_q, "Exposed_Qty": e_q, "Returns_Qty": r_q,
+                        "Total_Physical": total_phys, "System_Stock": int(sys_s), "Discrepancy": int(total_phys - sys_s)
+                    }}]}
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=audit_payload)
+                    
+                    if reason == "Damaged" and r_q > 0:
+                        dmg_payload = {"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Quantity": r_q, "Reason": "Damaged", "User": username}}]}
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Damaged_Stock", headers=HEADERS, json=dmg_payload)
+                    st.success(f"Audit Logged. Discrepancy: {int(total_phys - sys_s)}")
 
-    # --- TAB 5: ADMIN ---
+    # --- TAB: COMPARE (HAITI VS PV) ---
     if user_role == 'Admin':
-        with tabs[4]:
-            if st.button("📤 GitHub Backup"):
-                if not lib_data.empty:
-                    csv_b = lib_data.to_csv(index=False)
-                    b64 = base64.b64encode(csv_b.encode()).decode()
-                    url = f"https://api.github.com/repos/{REPO_NAME}/contents/backups/erp_{date.today()}.csv"
-                    gh_h = {"Authorization": f"token {st.secrets['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
-                    res = requests.put(url, headers=gh_h, json={"message": f"Backup {date.today()}", "content": b64})
-                    if res.status_code in [200, 201]: st.success("Backup Pushed!")
+        with tabs[3]:
+            st.subheader("🔄 Stock Comparison: Haiti vs. PV")
+            f_haiti = st.file_uploader("Upload Haiti Export", type=['xlsx'], key="h_up")
+            if f_haiti and not lib_data.empty:
+                df_h = clean_data(f_haiti, "current quantity dressup haiti")
+                comp = pd.merge(lib_data[['SKU', 'Full Name', 'Stock']], df_h[['SKU', 'Stock']], on='SKU', suffixes=('_PV', '_Haiti'))
+                st.dataframe(comp, use_container_width=True, hide_index=True)
 
-    # --- PASSWORD ---
+    # --- TAB: ADMIN (BACKUP) ---
+    if user_role == 'Admin':
+        with tabs[5]:
+            st.subheader("🛡️ Admin Panel")
+            if st.button("📤 GitHub Backup"):
+                csv_b = lib_data.to_csv(index=False)
+                b64 = base64.b64encode(csv_b.encode()).decode()
+                url = f"https://api.github.com/repos/{REPO_NAME}/contents/backups/erp_{date.today()}.csv"
+                gh_h = {"Authorization": f"token {st.secrets['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+                res = requests.put(url, headers=gh_h, json={"message": f"Backup {date.today()}", "content": b64})
+                if res.status_code in [200, 201]: st.success("Backup Saved to GitHub!")
+
+    # --- PASSWORD RESET ---
     with tabs[-1]:
         st.subheader("🔑 Change Password")
         try:
             if authenticator.reset_password(username, 'Update'):
-                st.success('Password updated!')
+                st.success('Password updated successfully!')
         except Exception as e: st.error(e)
 
 elif st.session_state["authentication_status"] is False:
     st.error('Incorrect Password')
 elif st.session_state["authentication_status"] is None:
-    st.warning('Enter login credentials')
+    st.warning('Please enter your login details.')
