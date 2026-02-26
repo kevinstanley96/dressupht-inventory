@@ -7,7 +7,7 @@ import time
 import base64
 
 # --- CONFIG & INITIALIZATION ---
-st.set_page_config(page_title="Dressupht ERP v3.4", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v3.5", layout="wide")
 
 REPO_NAME = "kevin/dressupht-inventory" 
 
@@ -26,6 +26,7 @@ authentication_status = authenticator.login(location='main')
 
 if st.session_state["authentication_status"]:
     username = st.session_state["username"]
+    # LOGOUT PLACEMENT
     authenticator.logout('Logout', 'sidebar')
 
     try:
@@ -52,15 +53,19 @@ if st.session_state["authentication_status"]:
             else: break
         if not all_recs: return pd.DataFrame()
         df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_recs])
-        
-        # 🔥 CRASH PROTECTION: Ensure mandatory columns exist
-        for col in ['Category', 'Full Name', 'SKU', 'Stock', 'Price', 'Last_Sync_Date']:
-            if col not in df.columns: df[col] = "N/A"
         return df
 
     def get_user_role(user):
         df = get_at_data("Role", {"filterByFormula": f"{{User Name}}='{user}'"})
         return df['Access Level'].iloc[0] if not df.empty and 'Access Level' in df.columns else 'Staff'
+
+    user_role = get_user_role(username)
+    if username == "Kevin": user_role = "Admin"
+    
+    # 🔥 RESTORED SIDEBAR INFO
+    st.sidebar.markdown(f"### 👤 User: **{username}**")
+    st.sidebar.markdown(f"### 🔑 Role: **{user_role}**")
+    st.sidebar.divider()
 
     def clean_data(file, loc_col_name="current quantity dressupht pv"):
         df = pd.read_excel(file, skiprows=1)
@@ -80,20 +85,16 @@ if st.session_state["authentication_status"]:
         df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0.0)
         return df
 
-    user_role = get_user_role(username)
-    if username == "Kevin": user_role = "Admin"
-
     # --- TABS ---
     if user_role == 'Admin':
-        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "📊 Sales", "🛡️ Admin", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Compare", "🛡️ Admin", "🔑 Password"])
     elif user_role == 'Manager':
-        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "📊 Sales", "🔑 Password"])
+        tabs = st.tabs(["📋 Library", "➕ Intake", "🕵️ Audit", "🔑 Password"])
     else:
         tabs = st.tabs(["📋 Library", "🕵️ Audit", "🔑 Password"])
 
     # --- SIDEBAR: SYNC ---
     if user_role == 'Admin':
-        st.sidebar.divider()
         f_pv = st.sidebar.file_uploader("Upload PV Square Export", type=['xlsx'])
         sync_date = st.sidebar.date_input("Sync Date", date.today())
         if f_pv and st.sidebar.button("🚀 Wipe & Sync to Cloud"):
@@ -117,17 +118,18 @@ if st.session_state["authentication_status"]:
             st.sidebar.success("Database Updated!")
             st.rerun()
 
-    # --- TAB 1: LIBRARY (WITH KEYERROR PROTECTION) ---
+    # --- TAB 1: LIBRARY ---
+    lib_data = get_at_data("Master_Inventory")
     with tabs[0]:
         st.subheader("📦 Master Inventory")
-        lib_data = get_at_data("Master_Inventory")
         if not lib_data.empty:
+            # Crash protection: Ensure columns exist
+            for col in ['Category', 'Full Name', 'SKU', 'Stock', 'Price', 'Last_Sync_Date']:
+                if col not in lib_data.columns: lib_data[col] = "N/A"
+            
             c1, c2, c3 = st.columns([2, 1, 1])
             search = c1.text_input("🔍 Search Name or SKU")
-            
-            # Safe list generation
-            cat_options = lib_data['Category'].fillna("Uncategorized").unique().tolist()
-            cat_list = ["All"] + sorted([str(x) for x in cat_options])
+            cat_list = ["All"] + sorted([str(x) for x in lib_data['Category'].fillna("Uncategorized").unique().tolist()])
             selected_cat = c2.selectbox("Filter Category", cat_list)
             sort_option = c3.selectbox("Sort By", ["Name (A-Z)", "Category", "Date Sync"])
 
@@ -137,28 +139,47 @@ if st.session_state["authentication_status"]:
             if selected_cat != "All":
                 filtered_df = filtered_df[filtered_df['Category'] == selected_cat]
 
-            # Sorting Logic
-            if sort_option == "Name (A-Z)":
-                filtered_df = filtered_df.sort_values(by="Full Name", ascending=True)
-            elif sort_option == "Category":
-                filtered_df = filtered_df.sort_values(by=["Category", "Full Name"], ascending=True)
-            elif sort_option == "Date Sync":
-                filtered_df = filtered_df.sort_values(by="Last_Sync_Date", ascending=False)
+            if sort_option == "Name (A-Z)": filtered_df = filtered_df.sort_values(by="Full Name", ascending=True)
+            elif sort_option == "Category": filtered_df = filtered_df.sort_values(by=["Category", "Full Name"], ascending=True)
+            elif sort_option == "Date Sync": filtered_df = filtered_df.sort_values(by="Last_Sync_Date", ascending=False)
 
             st.dataframe(filtered_df[['Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
         else: st.warning("No data found.")
 
-    # --- TAB 2: INTAKE ---
+    # --- TAB 2: INTAKE (WITH HISTORY & NAME MAPPING) ---
     if user_role in ['Admin', 'Manager']:
         with tabs[1]:
             st.subheader("➕ New Stock Shipment")
             with st.form("intake_form"):
                 i_sku = st.text_input("Scan/Enter SKU").strip()
                 i_qty = st.number_input("Quantity Received", min_value=1)
+                
                 if st.form_submit_button("Log Shipment"):
-                    ship_payload = {"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": i_sku, "Quantity": i_qty, "User": username}}]}
+                    # Find Wig Name from Master Inventory
+                    wig_name = "Unknown Wig"
+                    if not lib_data.empty and i_sku in lib_data['SKU'].values:
+                        wig_name = lib_data[lib_data['SKU'] == i_sku]['Full Name'].iloc[0]
+                    
+                    ship_payload = {"records": [{"fields": {
+                        "Date": datetime.now().isoformat(), 
+                        "SKU": i_sku, 
+                        "Name": wig_name, # Mapping to Airtable 'Name'
+                        "Quantity": i_qty, 
+                        "User": username
+                    }}]}
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=ship_payload)
-                    st.success("Shipment Logged!")
+                    st.success(f"Logged: {i_qty} units of {wig_name}")
+                    time.sleep(1)
+                    st.rerun()
+            
+            st.divider()
+            st.subheader("📜 Recent Intake History")
+            history_df = get_at_data("Shipments")
+            if not history_df.empty:
+                # Ensure Name column exists for display
+                if 'Name' not in history_df.columns: history_df['Name'] = "N/A"
+                history_df = history_df.sort_values(by="Date", ascending=False).head(10)
+                st.table(history_df[['Date', 'SKU', 'Name', 'Quantity', 'User']])
 
     # --- TAB 3: AUDIT ---
     audit_idx = 2 if user_role in ['Admin', 'Manager'] else 1
@@ -191,9 +212,9 @@ if st.session_state["authentication_status"]:
                 comp = pd.merge(lib_data[['SKU', 'Full Name', 'Stock', 'Category']], df_h[['SKU', 'Stock']], on='SKU', suffixes=('_PV', '_Haiti'))
                 st.dataframe(comp, use_container_width=True, hide_index=True)
 
-    # --- TAB 5: ADMIN & GITHUB ---
+    # --- TAB 5: ADMIN ---
     if user_role == 'Admin':
-        with tabs[5]:
+        with tabs[4]:
             st.subheader("🛡️ Admin Panel")
             if st.button("📤 Push Backup to GitHub"):
                 if not lib_data.empty:
