@@ -43,11 +43,9 @@ def get_at_data(table, base_id, headers):
         while True:
             params = {}
             if offset: params['offset'] = offset
-            # Always sort audits by newest first
-            if table == "Inventory_Audit":
+            if table in ["Shipments", "Inventory_Audit"]:
                 params['sort[0][field]'] = "Date"
                 params['sort[0][direction]'] = "desc"
-            
             res = requests.get(url, headers=headers, params=params)
             if res.status_code != 200: break
             data = res.json()
@@ -55,13 +53,11 @@ def get_at_data(table, base_id, headers):
             all_records.extend(records)
             offset = data.get('offset')
             if not offset: break
-        
         if not all_records: return pd.DataFrame()
         df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_records])
         if 'Date' in df.columns:
             temp_dt = pd.to_datetime(df['Date'], errors='coerce')
             df['Time'] = temp_dt.dt.strftime('%H:%M')
-            df['Date_Only'] = temp_dt.dt.date
         return df
     except: return pd.DataFrame()
 
@@ -91,12 +87,12 @@ if st.session_state["authentication_status"]:
         BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
-        st.error("Secrets Error. Check AIRTABLE_TOKEN and AIRTABLE_BASE_ID.")
+        st.error("Secrets Error.")
         st.stop()
 
     df_pv = pd.DataFrame()
     df_haiti = pd.DataFrame()
-    sales_ready = False
+    sales_ready = haiti_ready = False
 
     # --- SIDEBAR & UPLOADS ---
     if curr_user != 'guest':
@@ -114,83 +110,105 @@ if st.session_state["authentication_status"]:
                 sales_ready = True
             if f_haiti:
                 df_haiti = clean_data(f_haiti, "current quantity dressup haiti")
+                haiti_ready = True
+
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("⚡ Guest Sync")
+        f_quick = st.sidebar.file_uploader("Daily Square Export", type=['xlsx'], key="quick")
+        if f_quick and st.sidebar.button("🚀 Push to Guest Library"):
+            with st.spinner("Syncing..."):
+                df_q = clean_data(f_quick, "current quantity dressupht pv")
+                old = get_at_data("Master_Inventory", BASE_ID, HEADERS)
+                if not old.empty:
+                    ids = old['id'].tolist()
+                    for i in range(0, len(ids), 10): requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, params={"records[]": ids[i:i+10]})
+                recs = [{"fields": {"Full Name": str(r['Full Name']), "SKU": str(r['SKU']), "Stock": int(r['Stock']), "Category": str(r['Category'])}} for _, r in df_q.iterrows()]
+                for i in range(0, len(recs), 10): requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs[i:i+10]})
+                st.sidebar.success("Updated!")
+                time.sleep(1)
+                st.rerun()
 
     st.title("🦱 Dressupht Intelligence")
+    search = st.text_input("🔍 Global Search", placeholder="Wig name or SKU...")
 
     if curr_user == 'guest':
         tabs = st.tabs(["📋 Library"])
-        # Guest logic omitted for brevity, same as before
+        with tabs[0]:
+            data = get_at_data("Master_Inventory", BASE_ID, HEADERS)
+            if not data.empty:
+                view = data[['Full Name', 'Stock']]
+                if search: view = view[view['Full Name'].str.contains(search, case=False)]
+                st.dataframe(view, use_container_width=True, hide_index=True)
     else:
+        # ALL TABS RESTORED
         tabs = st.tabs(["➕ Intake", "🕵️ Audit", "📊 Sales", "🔄 Compare", "🚚 Transfers", "🔥 Fast/Slow", "❌ OOS", "💰 Finance", "📋 Library"])
 
-        with tabs[1]: # --- AUDIT TAB WITH NAME LOOKUP ---
-            st.subheader("🕵️ Physical Count Audit")
-            
-            # SKU CHECKER
-            a_sku = st.text_input("Scan SKU to Audit").strip()
-            wig_name_found = "Unknown SKU"
-            
+        with tabs[0]: # Intake
+            with st.form("in_f", clear_on_submit=True):
+                i_sku = st.text_input("Scan SKU").strip()
+                q = st.number_input("Quantity Received", min_value=1, step=1)
+                if st.form_submit_button("Sync Intake"):
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": i_sku, "Quantity": q, "User": curr_user}}]})
+                    st.success("Logged!")
+            ships = get_at_data("Shipments", BASE_ID, HEADERS)
+            if not ships.empty: st.dataframe(ships, use_container_width=True, hide_index=True)
+
+        with tabs[1]: # Audit (Improved)
+            a_sku = st.text_input("Scan SKU to Audit", key="aud_sku").strip()
             if a_sku and not df_pv.empty:
                 match = df_pv[df_pv['SKU'] == a_sku]
-                if not match.empty:
-                    wig_name_found = match.iloc[0]['Full Name']
-                    st.markdown(f"<div class='sku-match'>✅ Found: {wig_name_found}</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div class='sku-miss'>⚠️ SKU not in PV Square Export</div>", unsafe_allow_html=True)
-
+                if not match.empty: st.markdown(f"<div class='sku-match'>✅ Found: {match.iloc[0]['Full Name']}</div>", unsafe_allow_html=True)
+            
             with st.form("aud_f", clear_on_submit=True):
                 counter = st.selectbox("Who is counting?", ["Angelina", "David", "Annaelle", "Gerdine", "Kevin", "Darius", "Martilda", "Sebastien"])
-                col_a, col_b, col_c = st.columns(3)
-                m_qty = col_a.number_input("In Box/Stock", min_value=0, step=1)
-                e_qty = col_b.number_input("Exposed (Outside)", min_value=0, step=1)
-                r_qty = col_c.number_input("Returns", min_value=0, step=1)
-                
-                if st.form_submit_button("Log Audit Count", use_container_width=True):
-                    if a_sku:
-                        total_phys = m_qty + e_qty + r_qty
-                        sys_stock = 0
-                        discrepancy = 0
-                        if not df_pv.empty:
-                            match = df_pv[df_pv['SKU'] == a_sku]
-                            if not match.empty:
-                                sys_stock = match.iloc[0]['Stock']
-                                discrepancy = total_phys - sys_stock
-
-                        payload = {"records": [{"fields": {
-                            "Date": datetime.now().isoformat(), 
-                            "SKU": a_sku, 
-                            "Counter_Name": counter,
-                            "Manual_Qty": m_qty, 
-                            "Exposed_Qty": e_qty, 
-                            "Returns_Qty": r_qty,
-                            "Total_Physical": total_phys, 
-                            "System_Stock": int(sys_stock), 
-                            "Discrepancy": int(discrepancy), 
-                            "User": curr_user
-                        }}]}
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=payload)
-                        st.success(f"Recorded {wig_name_found}!")
-                        time.sleep(1)
-                        st.rerun()
-
-            st.write("### 📝 Recent Audit History")
+                c1, c2, c3 = st.columns(3)
+                m_q = c1.number_input("In Box", min_value=0, step=1)
+                e_q = c2.number_input("Exposed", min_value=0, step=1)
+                r_q = c3.number_input("Returns", min_value=0, step=1)
+                if st.form_submit_button("Save Audit"):
+                    total = m_q + e_q + r_q
+                    sys = 0
+                    if not df_pv.empty:
+                        m = df_pv[df_pv['SKU'] == a_sku]
+                        if not m.empty: sys = m.iloc[0]['Stock']
+                    payload = {"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Counter_Name": counter, "Manual_Qty": m_q, "Exposed_Qty": e_q, "Returns_Qty": r_q, "Total_Physical": total, "System_Stock": int(sys), "Discrepancy": int(total-sys), "User": curr_user}}]}
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=payload)
+                    st.success("Audit Recorded!")
+            
             auds = get_at_data("Inventory_Audit", BASE_ID, HEADERS)
             if not auds.empty:
-                # Merge with df_pv to get names in the history table
-                if not df_pv.empty:
-                    auds = pd.merge(auds, df_pv[['SKU', 'Full Name']], on='SKU', how='left')
-                
-                # Column check to prevent errors if Airtable is missing fields
-                display_cols = ['Time', 'Full Name', 'SKU', 'Counter_Name', 'System_Stock', 'Total_Physical', 'Discrepancy']
-                existing = [c for c in display_cols if c in auds.columns]
-                st.dataframe(auds[existing], use_container_width=True, hide_index=True)
+                if not df_pv.empty: auds = pd.merge(auds, df_pv[['SKU', 'Full Name']], on='SKU', how='left')
+                st.dataframe(auds, use_container_width=True, hide_index=True)
 
-        # Rest of the tabs (Sales, Finance, etc.) remain as per the previous full version
-        with tabs[7]: # Finance
+        with tabs[2]: # Sales (Restored)
+            if sales_ready: st.dataframe(df_pv[df_pv['Sold'] > 0][['Full Name', 'SKU', 'Stock_prev', 'Stock', 'Sold']], use_container_width=True, hide_index=True)
+            else: st.info("Upload Saturday files.")
+
+        with tabs[3]: # Compare (Restored)
+            if haiti_ready and not df_pv.empty:
+                comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv[['SKU', 'Full Name', 'Stock']], on='SKU', suffixes=('_haiti', '_pv'))
+                st.dataframe(comp, use_container_width=True, hide_index=True)
+
+        with tabs[4]: # Transfers (Restored)
+            if haiti_ready and not df_pv.empty:
+                trans = pd.merge(df_haiti[['SKU', 'Stock']], df_pv[['SKU', 'Full Name', 'Stock']], on='SKU', suffixes=('_haiti', '_pv'))
+                st.dataframe(trans[(trans['Stock_haiti'] > 2) & (trans['Stock_pv'] < 1)], use_container_width=True, hide_index=True)
+
+        with tabs[5]: # Fast/Slow (Restored)
+            if sales_ready: st.table(df_pv.nlargest(10, 'Sold')[['Full Name', 'Sold']])
+
+        with tabs[6]: # OOS (Restored)
+            if not df_pv.empty: st.dataframe(df_pv[df_pv['Stock'] == 0][['Full Name', 'SKU']], use_container_width=True, hide_index=True)
+
+        with tabs[7]: # Finance (Restored)
             if not df_pv.empty:
                 df_pv['Value'] = df_pv['Stock'] * df_pv['Price']
                 st.metric("Total Depot Value", f"${df_pv['Value'].sum():,.2f}")
                 st.dataframe(df_pv[['Full Name', 'Stock', 'Price', 'Value']], use_container_width=True, hide_index=True)
+
+        with tabs[8]: # Library
+            lib = get_at_data("Master_Inventory", BASE_ID, HEADERS)
+            if not lib.empty: st.dataframe(lib, use_container_width=True, hide_index=True)
 
 elif st.session_state["authentication_status"] is False:
     st.error("Login failed.")
