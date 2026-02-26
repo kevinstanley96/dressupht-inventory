@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import requests
 import streamlit_authenticator as stauth
-from datetime import date, datetime
+from datetime import date, datetime, timedelta # Added timedelta for timezone fix
 import time
 
 # 1. Page Config
-st.set_page_config(page_title="Dressupht Stock", layout="wide")
+st.set_page_config(page_title="Dressupht Intelligence", layout="wide")
 
 # --- MOBILE OPTIMIZATION CSS ---
 st.markdown("""
@@ -18,7 +18,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- USER AUTHENTICATION ---
-# Removed CookieManager here to fix the component loading error
 config = {
     'credentials': {
         'usernames': {
@@ -41,7 +40,6 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# Render the login widget
 authenticator.login()
 
 # --- HELPER FUNCTIONS ---
@@ -53,8 +51,7 @@ def get_at_data(table, base_id, headers):
         
         while True:
             params = {}
-            if offset:
-                params['offset'] = offset
+            if offset: params['offset'] = offset
             
             if table in ["Shipments", "Inventory_Audit"]:
                 params['sort[0][field]'] = "Date"
@@ -64,27 +61,29 @@ def get_at_data(table, base_id, headers):
                 params['sort[0][direction]'] = "asc"
 
             res = requests.get(url, headers=headers, params=params)
-            if res.status_code != 200:
-                break
+            if res.status_code != 200: break
                 
             data = res.json()
             records = data.get('records', [])
             all_records.extend(records)
-            
             offset = data.get('offset')
-            if not offset:
-                break
+            if not offset: break
         
         if not all_records: return pd.DataFrame()
         
         df = pd.DataFrame([dict(r['fields'], id=r['id']) for r in all_records])
         
+        # --- TIMEZONE CORRECTION (UTC to Haiti -5h) ---
         if 'Date' in df.columns:
-            temp_dt = pd.to_datetime(df['Date'], errors='coerce')
+            # Convert the raw Airtable date/time to local Haiti time
+            temp_dt = pd.to_datetime(df['Date'], errors='coerce') - timedelta(hours=5)
             df['Time'] = temp_dt.dt.strftime('%H:%M')
             df['Date'] = temp_dt.dt.date
+            
         if 'Last Updated' in df.columns:
-            df['Last Updated Display'] = pd.to_datetime(df['Last Updated']).dt.strftime('%m/%d %H:%M')
+            updated_dt = pd.to_datetime(df['Last Updated']) - timedelta(hours=5)
+            df['Last Updated Display'] = updated_dt.dt.strftime('%m/%d %H:%M')
+            
         return df
     except: return pd.DataFrame()
 
@@ -159,7 +158,7 @@ if st.session_state["authentication_status"]:
                 time.sleep(1)
                 st.rerun()
 
-    st.title("DRESSUP HAITI STOCK SYSTEM")
+    st.title("🦱 Dressupht Intelligence")
     search = st.text_input("🔍 Search", placeholder="Wig name or SKU...")
 
     if curr_user == 'guest':
@@ -186,7 +185,7 @@ if st.session_state["authentication_status"]:
                 q = st.number_input("Quantity Received", min_value=1, step=1)
                 if st.form_submit_button("Sync to Cloud", use_container_width=True):
                     if i_sku:
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": i_sku, "Quantity": q, "User": curr_user}}]})
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.utcnow().isoformat(), "SKU": i_sku, "Quantity": q, "User": curr_user}}]})
                         st.success("Logged!")
                         time.sleep(1)
                         st.rerun()
@@ -203,7 +202,7 @@ if st.session_state["authentication_status"]:
                 m = st.number_input("Manual Qty Found", min_value=0, step=1)
                 if st.form_submit_button("Log Audit Count", use_container_width=True):
                     if a_sku:
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.now().isoformat(), "SKU": a_sku, "Manual_Qty": m, "User": curr_user}}]})
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json={"records": [{"fields": {"Date": datetime.utcnow().isoformat(), "SKU": a_sku, "Manual_Qty": m, "User": curr_user}}]})
                         st.success("Audit Recorded!")
                         time.sleep(1)
                         st.rerun()
@@ -216,13 +215,11 @@ if st.session_state["authentication_status"]:
         with tabs[2]: # Sales
             if sales_ready:
                 st.dataframe(df_pv[df_pv['Sold'] > 0][['Full Name', 'SKU', 'Stock_prev', 'Stock', 'Sold']], use_container_width=True, hide_index=True)
-            else: st.info("Upload THIS and LAST Saturday files.")
 
         with tabs[3]: # Compare
             if haiti_ready and not df_pv.empty:
                 comp = pd.merge(df_haiti[['SKU', 'Stock']], df_pv[['SKU', 'Full Name', 'Stock']], on='SKU', suffixes=('_haiti', '_pv'))
                 st.dataframe(comp, use_container_width=True, hide_index=True)
-            else: st.info("Upload Haiti and PV files.")
 
         with tabs[4]: # Transfers
             if haiti_ready and not df_pv.empty:
