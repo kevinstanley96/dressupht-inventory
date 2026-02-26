@@ -6,7 +6,7 @@ from datetime import date, datetime
 import time
 
 # 1. Page Config
-st.set_page_config(page_title="DRESSUP HAITI STOCK SYSTEM", layout="wide")
+st.set_page_config(page_title="Dressupht Stock", layout="wide")
 
 # --- MOBILE OPTIMIZATION CSS ---
 st.markdown("""
@@ -18,6 +18,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- USER AUTHENTICATION ---
+# Removed CookieManager here to fix the component loading error
 config = {
     'credentials': {
         'usernames': {
@@ -26,10 +27,21 @@ config = {
             'guest': {'name': 'Inventory Guest', 'password': 'guestpassword123'}
         }
     },
-    'cookie': {'expiry_days': 30, 'key': 'inventory_signature_key', 'name': 'inventory_cookie'}
+    'cookie': {
+        'expiry_days': 30, 
+        'key': 'inventory_signature_key', 
+        'name': 'inventory_cookie'
+    }
 }
 
-authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
+authenticator = stauth.Authenticate(
+    config['credentials'], 
+    config['cookie']['name'], 
+    config['cookie']['key'], 
+    config['cookie']['expiry_days']
+)
+
+# Render the login widget
 authenticator.login()
 
 # --- HELPER FUNCTIONS ---
@@ -39,13 +51,11 @@ def get_at_data(table, base_id, headers):
     try:
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
         
-        # --- PAGINATION LOOP: Fetch ALL records beyond the first 100 ---
         while True:
             params = {}
             if offset:
                 params['offset'] = offset
             
-            # Sorting logic
             if table in ["Shipments", "Inventory_Audit"]:
                 params['sort[0][field]'] = "Date"
                 params['sort[0][direction]'] = "desc"
@@ -61,7 +71,6 @@ def get_at_data(table, base_id, headers):
             records = data.get('records', [])
             all_records.extend(records)
             
-            # Check if there are more records to fetch
             offset = data.get('offset')
             if not offset:
                 break
@@ -237,6 +246,6 @@ if st.session_state["authentication_status"]:
             if not lib.empty: st.dataframe(lib.drop(columns=['id'], errors='ignore'), use_container_width=True, hide_index=True)
 
 elif st.session_state["authentication_status"] is False:
-    st.error("Login failed.")
-
-
+    st.error("Username/password is incorrect")
+elif st.session_state["authentication_status"] is None:
+    st.warning("Please enter your username and password")
