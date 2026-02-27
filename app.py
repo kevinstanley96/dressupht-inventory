@@ -10,7 +10,7 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.6", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.7", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -118,7 +118,6 @@ if st.session_state["authentication_status"]:
                     full = pd.concat([d1, d2], ignore_index=True)
                     old = get_at_data("Master_Inventory")
 
-                    # --- NOTIFICATION LOGIC: PRICE & NEW STOCK ---
                     if not old.empty:
                         # Price Check
                         merged = pd.merge(full, old, on='SKU', suffixes=('_new', '_old'))
@@ -186,7 +185,13 @@ if st.session_state["authentication_status"]:
                 disp_df = disp_df.sort_values(by="Full Name")
 
         if search:
-            disp_df = disp_df[disp_df['Full Name'].str.contains(search, case=False, na=False) | disp_df['SKU'].str.contains(search, na=False)]
+            # --- CASE INSENSITIVE SEARCH FIX ---
+            search = search.lower()
+            disp_df = disp_df[
+                disp_df['Full Name'].str.lower().str.contains(search, na=False) | 
+                disp_df['SKU'].str.lower().str.contains(search, na=False)
+            ]
+            
         st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
     # --- TAB 2: INTAKE (PERSISTENT) ---
@@ -198,7 +203,10 @@ if st.session_state["authentication_status"]:
             with col1:
                 in_sku = st.text_input("Scan SKU", key="int_sku").strip()
                 if in_sku and in_sku != st.session_state.intake_verify["sku"]:
-                    match = master_data[(master_data['SKU'] == in_sku) & (master_data['Location'] == "Pv")]
+                    # --- CASE INSENSITIVE SKU SEARCH FIX ---
+                    match = master_data[master_data['SKU'].str.lower() == in_sku.lower()]
+                    match = match[match['Location'] == "Pv"]
+                    
                     if not match.empty:
                         st.session_state.intake_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
                     else:
@@ -230,7 +238,10 @@ if st.session_state["authentication_status"]:
                 counter = st.selectbox("Counter Name", usernames_list)
                 a_sku = st.text_input("SKU to Audit", key="aud_sku").strip()
                 if a_sku and a_sku != st.session_state.audit_verify["sku"]:
-                    match = master_data[(master_data['SKU'] == a_sku) & (master_data['Location'] == "Pv")]
+                    # --- CASE INSENSITIVE SKU SEARCH FIX ---
+                    match = master_data[master_data['SKU'].str.lower() == a_sku.lower()]
+                    match = match[match['Location'] == "Pv"]
+                    
                     if not match.empty:
                         st.session_state.audit_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sys": int(match['Stock'].iloc[0]), "sku": a_sku}
                     else:
