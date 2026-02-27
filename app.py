@@ -5,12 +5,11 @@ import streamlit_authenticator as stauth
 from datetime import datetime, date
 import time
 import plotly.express as px
-from fpdf import FPDF 
 import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.11", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.14", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -31,7 +30,7 @@ def send_email(subject, body, recipients):
     msg.set_content(body)
     msg['Subject'] = subject
     msg['From'] = st.secrets["EMAIL_ADDRESS"]
-    msg['To'] = ", ".join(recipients) # Joins list of emails into one string
+    msg['To'] = ", ".join(recipients) 
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
@@ -48,6 +47,7 @@ if st.session_state["authentication_status"]:
     # --- SESSION STATE ---
     if 'audit_verify' not in st.session_state: st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": ""}
     if 'intake_verify' not in st.session_state: st.session_state.intake_verify = {"name": None, "cat": None, "sku": ""}
+    if 'depot_verify' not in st.session_state: st.session_state.depot_verify = {"name": None, "sku": ""}
 
     try:
         AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
@@ -57,7 +57,8 @@ if st.session_state["authentication_status"]:
         st.error("Missing Secrets!")
         st.stop()
 
-    @st.cache_data(ttl=60)
+    # --- OPTIMIZED CACHING ---
+    @st.cache_data(ttl=300) # Cache for 5 minutes
     def get_at_data(table):
         all_records = []
         offset = None
@@ -112,20 +113,18 @@ if st.session_state["authentication_status"]:
 
     # --- DASHBOARD HEADER (ADMIN ONLY) ---
     if user_role == "Admin":
-        with st.expander("🛡️ Master Data Sync (Admin Only)", expanded=True):
+        with st.expander("🛡️ Master Data Sync (Admin Only)", expanded=False):
             st.info("Upload files here to sync both locations to Airtable.")
             c_u1, c_u2 = st.columns(2)
             fp = c_u1.file_uploader("PV Square File", type=['xlsx'], key="sync_p")
             fh = c_u2.file_uploader("Canape-Vert Square File", type=['xlsx'], key="sync_h")
             
-            # --- TEST EMAIL BUTTON (UPDATED) ---
             if st.button("🧪 Test Email to All Staff"):
-                # Fetch all unique emails from the Role table
                 if 'Email' in roles_df.columns:
                     email_list = roles_df['Email'].dropna().unique().tolist()
                     if email_list:
                         st.info(f"Sending test email to: {', '.join(email_list)}")
-                        if send_email("Test Subject - Team Notification", "This is a test email sent to all staff members from Dressupht ERP.", email_list):
+                        if send_email("Test Subject - Team Notification", "This is a test email sent to all staff members.", email_list):
                             st.success("Test emails sent successfully!")
                         else:
                             st.error("Failed to send test emails.")
@@ -135,17 +134,14 @@ if st.session_state["authentication_status"]:
                     st.error("No 'Email' column found in Role table.")
 
             if fp and fh and st.button("🚀 Run Wipe & Sync"):
-                with st.spinner("Processing files and checking for changes..."):
+                with st.spinner("Processing files..."):
                     d1 = clean_location_data(fp, "Pv")
                     d2 = clean_location_data(fh, "Canape-Vert")
                     full = pd.concat([d1, d2], ignore_index=True)
                     old = get_at_data("Master_Inventory")
-                    
-                    # --- GET EMAIL LIST FOR LIVE NOTIFICATIONS ---
                     email_list = roles_df['Email'].dropna().unique().tolist()
 
                     if not old.empty:
-                        # Price Check
                         merged = pd.merge(full, old, on='SKU', suffixes=('_new', '_old'))
                         price_changes = merged[merged['Price_new'] != merged['Price_old']]
                         
@@ -155,7 +151,6 @@ if st.session_state["authentication_status"]:
                                 msg += f"- {r['Full Name_new']}: ${r['Price_old']} -> ${r['Price_new']}\n"
                             send_email("🚨 Price Update Notification", msg, email_list)
                         
-                        # New Stock Check
                         new_stock = merged[(merged['Stock_old'] == 0) & (merged['Stock_new'] > 0)]
                         if not new_stock.empty:
                             msg = "Items Now Back in Stock:\n"
@@ -163,30 +158,25 @@ if st.session_state["authentication_status"]:
                                 msg += f"- {r['Full Name_new']} ({r['Location_new']})\n"
                             send_email("✅ New Stock Arrival", msg, email_list)
 
-                        # Delete old records
                         for i in range(0, len(old), 10):
                             batch = old['id'].tolist()[i:i+10]
                             q = "&".join([f"records[]={rid}" for rid in batch])
                             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{q}", headers=HEADERS)
                     
-                    # Upload new records
-                    prog = st.progress(0)
                     for i in range(0, len(full), 10):
                         chunk = full.iloc[i:i+10]
                         recs = [{"fields": r.to_dict()} for _, r in chunk.iterrows()]
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
-                        prog.progress(min((i+10)/len(full), 1.0))
                         time.sleep(0.2)
-                    st.success("Database Updated and Notifications Sent to All Staff")
+                    st.success("Database Updated")
                     st.cache_data.clear()
                     st.rerun()
 
-    # --- TABS SETUP (No Icons) ---
-    if user_role == "Admin":
-        tab_list = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Password"]
-    elif user_role == "Manager":
-        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Password"]
-    else:
+    # --- TABS SETUP ---
+    tab_list = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Password"]
+    if user_role == "Manager":
+        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Password"]
+    elif user_role == "Staff":
         tab_list = ["Library", "Password"]
     tabs = st.tabs(tab_list)
 
@@ -211,10 +201,8 @@ if st.session_state["authentication_status"]:
                 disp_df = disp_df.sort_values(by="Full Name")
 
         if search:
-            # --- FLEXIBLE SEARCH FIX: TOKENIZE SEARCH QUERY ---
             search_clean = search.strip().lower()
             search_tokens = search_clean.split()
-            
             disp_df = disp_df[
                 disp_df.apply(lambda row: all(
                     token in str(row['Full Name']).lower() or 
@@ -225,7 +213,7 @@ if st.session_state["authentication_status"]:
             
         st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
-    # --- TAB 2: INTAKE (PERSISTENT) ---
+    # --- TAB 2: INTAKE ---
     if user_role in ["Admin", "Manager"]:
         with tabs[1]:
             st.subheader("Stock Intake (PV Tracking)")
@@ -234,10 +222,8 @@ if st.session_state["authentication_status"]:
             with col1:
                 in_sku = st.text_input("Scan SKU", key="int_sku").strip()
                 if in_sku and in_sku != st.session_state.intake_verify["sku"]:
-                    # --- ROBUST SKU SEARCH FIX ---
                     match = master_data[master_data['SKU'].str.strip().str.lower() == in_sku.strip().lower()]
                     match = match[match['Location'] == "Pv"]
-                    
                     if not match.empty:
                         st.session_state.intake_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
                     else:
@@ -247,12 +233,9 @@ if st.session_state["authentication_status"]:
                     st.success(f"**Item:** {st.session_state.intake_verify['name']}")
                 with st.form("int_form", clear_on_submit=True):
                     in_qty = st.number_input("Qty Received", min_value=1)
-                    
-                    # --- MANUAL DATE SELECTION WIDGET ---
                     selected_date = st.date_input("Select Date Received", value=date.today())
                     
                     if st.form_submit_button("Record Intake") and st.session_state.intake_verify["name"]:
-                        # Uses selected date instead of current date
                         payload = {"records": [{"fields": {"Date": str(selected_date), "SKU": in_sku, "Wig Name": st.session_state.intake_verify["name"], "Category": st.session_state.intake_verify["cat"], "Quantity": in_qty, "User": username, "Location": "Pv"}}]}
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=payload)
                         st.toast(f"Intake Saved for {selected_date}!")
@@ -264,7 +247,7 @@ if st.session_state["authentication_status"]:
                     h['Date'] = pd.to_datetime(h['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(h[['Date', 'SKU', 'Wig Name', 'Quantity']], hide_index=True)
 
-    # --- TAB 3: AUDIT (PERSISTENT) ---
+    # --- TAB 3: AUDIT ---
     if user_role in ["Admin", "Manager"]:
         with tabs[2]:
             st.subheader("Manual Inventory Audit")
@@ -274,7 +257,6 @@ if st.session_state["authentication_status"]:
                 counter = st.selectbox("Counter Name", usernames_list)
                 a_sku = st.text_input("SKU to Audit", key="aud_sku").strip()
                 if a_sku and a_sku != st.session_state.audit_verify["sku"]:
-                    # --- ROBUST SKU SEARCH FIX ---
                     match = master_data[master_data['SKU'].str.strip().str.lower() == a_sku.strip().lower()]
                     match = match[match['Location'] == "Pv"]
                     
@@ -301,7 +283,7 @@ if st.session_state["authentication_status"]:
                     aud_h['Date'] = pd.to_datetime(aud_h['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(aud_h.sort_values(by="Date", ascending=False), hide_index=True)
 
-    # --- TAB 4: SALES (DELTA ENGINE) ---
+    # --- TAB 4: SALES ---
     if user_role == "Admin":
         with tabs[3]:
             st.subheader("Monday Sales Delta Engine (PV)")
@@ -321,11 +303,10 @@ if st.session_state["authentication_status"]:
                     st.plotly_chart(px.pie(ed_sales, values='Revenue', names='Category', hole=0.4, title="Revenue by Category"))
                 else: st.warning("No sales detected.")
 
-    # --- TAB 5: COMPARISON (NAME MATCH ENGINE) ---
+    # --- TAB 5: COMPARISON ---
     if user_role in ["Admin", "Manager"]:
         with tabs[4]:
             st.subheader("Stock Comparison: Canape-Vert vs PV")
-            st.info("Compare stock levels by Wig Name to plan internal transfers.")
             c_comp1, c_comp2 = st.columns(2)
             f_cv = c_comp1.file_uploader("Upload Canape-Vert File", type=['xlsx'], key="comp_cv")
             f_pv = c_comp2.file_uploader("Upload PV File", type=['xlsx'], key="comp_pv")
@@ -343,12 +324,10 @@ if st.session_state["authentication_status"]:
                 low_pv = len(merged_comp[(merged_comp['Stock_PV'] <= 1) & (merged_comp['Stock_CV'] > 2)])
                 st.metric("Potential Transfer Requests", low_pv)
 
-    # --- TAB 6: FAST/SLOW (NEW TAB) ---
+    # --- TAB 6: FAST/SLOW ---
     if user_role in ["Admin", "Manager"]:
         with tabs[5]:
             st.subheader("Fast & Slow Moving Wigs")
-            st.info("Upload Old and New files to analyze sales speed.")
-            
             cs1, cs2 = st.columns(2)
             old_fs = cs1.file_uploader("OLD Square File", type=['xlsx'], key="fs_old")
             new_fs = cs2.file_uploader("NEW Square File", type=['xlsx'], key="fs_new")
@@ -372,7 +351,52 @@ if st.session_state["authentication_status"]:
                 c_s1.dataframe(slow_df.head(5)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
                 c_s2.dataframe(slow_df.head(10)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
 
-    # --- TAB 7: PASSWORD ---
+    # --- TAB 7: BIG DEPOT ---
+    if user_role in ["Admin", "Manager"]:
+        with tabs[6]:
+            st.subheader("Depot Inventory Tracking")
+            master_data = get_at_data("Master_Inventory")
+            depot_data = get_at_data("Big_Depot")
+            
+            c_d1, c_d2 = st.columns([1, 2])
+            with c_d1:
+                d_sku = st.text_input("Scan SKU for Depot", key="dep_sku").strip()
+                if d_sku and d_sku != st.session_state.depot_verify["sku"]:
+                    match = master_data[master_data['SKU'].str.strip().str.lower() == d_sku.strip().lower()]
+                    if not match.empty:
+                        st.session_state.depot_verify = {"name": match['Full Name'].iloc[0], "sku": d_sku}
+                    else:
+                        st.session_state.depot_verify = {"name": None, "sku": d_sku}
+                        st.error("SKU Not Found in Master Inventory")
+                
+                if st.session_state.depot_verify["name"]:
+                    st.success(f"**Item:** {st.session_state.depot_verify['name']}")
+                
+                with st.form("depot_form", clear_on_submit=True):
+                    d_type = st.selectbox("Action", ["Addition", "Subtraction"])
+                    d_qty = st.number_input("Quantity", min_value=1)
+                    d_date = st.date_input("Date", value=date.today())
+                    
+                    if st.form_submit_button("Save Depot Movement") and st.session_state.depot_verify["name"]:
+                        payload = {"records": [{"fields": {
+                            "Date": str(d_date),
+                            "SKU": d_sku,
+                            "Wig Name": st.session_state.depot_verify["name"],
+                            "Type": d_type,
+                            "Quantity": d_qty,
+                            "User": username
+                        }}]}
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Big_Depot", headers=HEADERS, json=payload)
+                        st.toast(f"{d_type} Saved!")
+                        st.cache_data.clear()
+
+            with c_d2:
+                st.markdown("### Depot Log")
+                if not depot_data.empty:
+                    depot_data['Date'] = pd.to_datetime(depot_data['Date']).dt.strftime('%Y-%m-%d')
+                    st.dataframe(depot_data.sort_values(by="Date", ascending=False), hide_index=True)
+
+    # --- TAB 8: PASSWORD ---
     with tabs[-1]:
         st.subheader("Password")
         if authenticator.reset_password(username=username, fields={'form_name': 'Update'}):
@@ -380,4 +404,3 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
-
