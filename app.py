@@ -10,7 +10,7 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.10", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.11", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -21,12 +21,17 @@ authenticator = stauth.Authenticate(credentials, "inventory_cookie", "abcdef1234
 name, authentication_status, username = authenticator.login(location='main')
 
 # --- EMAIL NOTIFICATION FUNCTION ---
-def send_email(subject, body):
+def send_email(subject, body, recipients):
+    """Sends an email to a list of recipients."""
+    if not recipients:
+        st.warning("No recipients provided.")
+        return False
+        
     msg = EmailMessage()
     msg.set_content(body)
     msg['Subject'] = subject
     msg['From'] = st.secrets["EMAIL_ADDRESS"]
-    msg['To'] = st.secrets["EMAIL_ADDRESS"] # In production, this would be a list of staff emails
+    msg['To'] = ", ".join(recipients) # Joins list of emails into one string
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
@@ -113,12 +118,21 @@ if st.session_state["authentication_status"]:
             fp = c_u1.file_uploader("PV Square File", type=['xlsx'], key="sync_p")
             fh = c_u2.file_uploader("Canape-Vert Square File", type=['xlsx'], key="sync_h")
             
-            # --- TEST EMAIL BUTTON ---
-            if st.button("🧪 Test Email Settings"):
-                if send_email("Test Subject", "This is a test email from Dressupht ERP."):
-                    st.success("Test email sent successfully!")
+            # --- TEST EMAIL BUTTON (UPDATED) ---
+            if st.button("🧪 Test Email to All Staff"):
+                # Fetch all unique emails from the Role table
+                if 'Email' in roles_df.columns:
+                    email_list = roles_df['Email'].dropna().unique().tolist()
+                    if email_list:
+                        st.info(f"Sending test email to: {', '.join(email_list)}")
+                        if send_email("Test Subject - Team Notification", "This is a test email sent to all staff members from Dressupht ERP.", email_list):
+                            st.success("Test emails sent successfully!")
+                        else:
+                            st.error("Failed to send test emails.")
+                    else:
+                        st.warning("No emails found in the Role table.")
                 else:
-                    st.error("Failed to send test email.")
+                    st.error("No 'Email' column found in Role table.")
 
             if fp and fh and st.button("🚀 Run Wipe & Sync"):
                 with st.spinner("Processing files and checking for changes..."):
@@ -126,6 +140,9 @@ if st.session_state["authentication_status"]:
                     d2 = clean_location_data(fh, "Canape-Vert")
                     full = pd.concat([d1, d2], ignore_index=True)
                     old = get_at_data("Master_Inventory")
+                    
+                    # --- GET EMAIL LIST FOR LIVE NOTIFICATIONS ---
+                    email_list = roles_df['Email'].dropna().unique().tolist()
 
                     if not old.empty:
                         # Price Check
@@ -136,7 +153,7 @@ if st.session_state["authentication_status"]:
                             msg = "Price Changes:\n"
                             for _, r in price_changes.iterrows():
                                 msg += f"- {r['Full Name_new']}: ${r['Price_old']} -> ${r['Price_new']}\n"
-                            send_email("🚨 Price Update Notification", msg)
+                            send_email("🚨 Price Update Notification", msg, email_list)
                         
                         # New Stock Check
                         new_stock = merged[(merged['Stock_old'] == 0) & (merged['Stock_new'] > 0)]
@@ -144,7 +161,7 @@ if st.session_state["authentication_status"]:
                             msg = "Items Now Back in Stock:\n"
                             for _, r in new_stock.iterrows():
                                 msg += f"- {r['Full Name_new']} ({r['Location_new']})\n"
-                            send_email("✅ New Stock Arrival", msg)
+                            send_email("✅ New Stock Arrival", msg, email_list)
 
                         # Delete old records
                         for i in range(0, len(old), 10):
@@ -160,7 +177,7 @@ if st.session_state["authentication_status"]:
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
                         prog.progress(min((i+10)/len(full), 1.0))
                         time.sleep(0.2)
-                    st.success("Database Updated and Notifications Sent")
+                    st.success("Database Updated and Notifications Sent to All Staff")
                     st.cache_data.clear()
                     st.rerun()
 
