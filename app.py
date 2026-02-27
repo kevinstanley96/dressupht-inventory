@@ -8,7 +8,7 @@ import plotly.express as px
 from fpdf import FPDF 
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.3", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.4", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -57,13 +57,20 @@ if st.session_state["authentication_status"]:
         df.columns = [str(c).strip() for c in df.columns]
         mapping = {'Item Name': 'Wig Name', 'Variation Name': 'Style', 'SKU': 'SKU', 'Price': 'Price', 'Categories': 'Category'}
         df = df.rename(columns=mapping)
-        stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
+        
+        # 1. MAPPING CHECK
+        if loc_name == "Canape-Vert":
+            stock_col = "Current Quantity Dressup Haiti"
+        else:
+            stock_col = "Current Quantity Dressupht Pv"
+
         if stock_col in df.columns:
             df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int)
         else:
-            st.error(f"❌ Column '{stock_col}' not found.")
             df['Stock'] = 0 
+            
         df['Category'] = df['Category'].fillna("Uncategorized")
+        # 2. ENSURE LOCATION IS SET
         df['Location'] = loc_name
         df['SKU'] = df['SKU'].astype(str).str.strip().replace('nan', 'NO_SKU')
         w_name, s_name = df['Wig Name'].astype(str).replace('nan', 'Unknown'), df['Style'].astype(str).replace('nan', '')
@@ -89,25 +96,37 @@ if st.session_state["authentication_status"]:
             c_u1, c_u2 = st.columns(2)
             fp = c_u1.file_uploader("PV Square File", type=['xlsx'], key="sync_p")
             fh = c_u2.file_uploader("Canape-Vert Square File", type=['xlsx'], key="sync_h")
+            
             if fp and fh and st.button("🚀 Run Wipe & Sync"):
-                d1, d2 = clean_location_data(fp, "Pv"), clean_location_data(fh, "Canape-Vert")
-                full = pd.concat([d1, d2]).reset_index(drop=True)
-                old = get_at_data("Master_Inventory")
-                if not old.empty:
-                    for i in range(0, len(old), 10):
-                        batch = old['id'].tolist()[i:i+10]
-                        q = "&".join([f"records[]={rid}" for rid in batch])
-                        requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{q}", headers=HEADERS)
-                prog = st.progress(0)
-                for i in range(0, len(full), 10):
-                    chunk = full.iloc[i:i+10]
-                    recs = [{"fields": r.to_dict()} for _, r in chunk.iterrows()]
-                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
-                    prog.progress(min((i+10)/len(full), 1.0))
-                    time.sleep(0.2)
-                st.success("Database Updated")
-                st.cache_data.clear()
-                st.rerun()
+                with st.spinner("Processing files..."):
+                    d1 = clean_location_data(fp, "Pv")
+                    d2 = clean_location_data(fh, "Canape-Vert")
+                    
+                    # 3. CONCATENATE SAFELY
+                    full = pd.concat([d1, d2], ignore_index=True)
+                    
+                    # Debug: Show user what was processed
+                    st.write(f"Processed PV: {len(d1)} items")
+                    st.write(f"Processed CV: {len(d2)} items")
+                    st.write(f"Total to upload: {len(full)} items")
+
+                    old = get_at_data("Master_Inventory")
+                    if not old.empty:
+                        for i in range(0, len(old), 10):
+                            batch = old['id'].tolist()[i:i+10]
+                            q = "&".join([f"records[]={rid}" for rid in batch])
+                            requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{q}", headers=HEADERS)
+                    
+                    prog = st.progress(0)
+                    for i in range(0, len(full), 10):
+                        chunk = full.iloc[i:i+10]
+                        recs = [{"fields": r.to_dict()} for _, r in chunk.iterrows()]
+                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
+                        prog.progress(min((i+10)/len(full), 1.0))
+                        time.sleep(0.2)
+                    st.success("Database Updated")
+                    st.cache_data.clear()
+                    st.rerun()
 
     # --- TABS SETUP ---
     if user_role == "Admin":
@@ -156,7 +175,7 @@ if st.session_state["authentication_status"]:
                         st.session_state.intake_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
                     else:
                         st.session_state.intake_verify = {"name": None, "cat": None, "sku": in_sku}
-                        st.error("SKU Not Found")
+                        st.error("SKU Not Found in Pv")
                 if st.session_state.intake_verify["name"]:
                     st.success(f"**Item:** {st.session_state.intake_verify['name']}")
                 with st.form("int_form", clear_on_submit=True):
@@ -188,7 +207,7 @@ if st.session_state["authentication_status"]:
                         st.session_state.audit_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sys": int(match['Stock'].iloc[0]), "sku": a_sku}
                     else:
                         st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": a_sku}
-                        st.error("SKU Not Found")
+                        st.error("SKU Not Found in Pv")
                 if st.session_state.audit_verify["name"]:
                     st.success(f"Item: {st.session_state.audit_verify['name']}")
                     st.info(f"System Stock: {st.session_state.audit_verify['sys']}")
