@@ -356,11 +356,13 @@ if st.session_state["authentication_status"]:
         with tabs[6]:
             st.subheader("Depot Inventory Tracking")
             master_data = get_at_data("Master_Inventory")
+            
+            # Use a unique key for caching depot data to avoid conflicts
             depot_data = get_at_data("Big_Depot")
             
             c_d1, c_d2 = st.columns([1, 2])
             with c_d1:
-                d_sku = st.text_input("Scan SKU for Depot", key="dep_sku").strip()
+                d_sku = st.text_input("Scan SKU for Depot", key="dep_sku_input").strip()
                 if d_sku and d_sku != st.session_state.depot_verify["sku"]:
                     match = master_data[master_data['SKU'].str.strip().str.lower() == d_sku.strip().lower()]
                     if not match.empty:
@@ -378,6 +380,7 @@ if st.session_state["authentication_status"]:
                     d_date = st.date_input("Date", value=date.today())
                     
                     if st.form_submit_button("Save Depot Movement") and st.session_state.depot_verify["name"]:
+                        # --- ROBUST API CALL WITH ERROR HANDLING ---
                         payload = {"records": [{"fields": {
                             "Date": str(d_date),
                             "SKU": d_sku,
@@ -386,13 +389,23 @@ if st.session_state["authentication_status"]:
                             "Quantity": d_qty,
                             "User": username
                         }}]}
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Big_Depot", headers=HEADERS, json=payload)
-                        st.toast(f"{d_type} Saved!")
-                        st.cache_data.clear()
+                        
+                        try:
+                            response = requests.post(
+                                f"https://api.airtable.com/v0/{BASE_ID}/Big_Depot", 
+                                headers=HEADERS, 
+                                json=payload
+                            )
+                            response.raise_for_status() # Raises an exception for 4XX/5XX errors
+                            st.toast(f"✅ {d_type} Saved to Depot!")
+                            st.cache_data.clear() # Refresh data
+                        except requests.exceptions.RequestException as e:
+                            st.error(f"❌ Failed to save to Airtable: {e}")
 
             with c_d2:
                 st.markdown("### Depot Log")
                 if not depot_data.empty:
+                    # Ensure date is sorted correctly
                     depot_data['Date'] = pd.to_datetime(depot_data['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(depot_data.sort_values(by="Date", ascending=False), hide_index=True)
 
@@ -404,3 +417,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
