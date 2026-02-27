@@ -117,9 +117,13 @@ if st.session_state["authentication_status"]:
         if user_role == "Staff" and user_location != "Both":
             disp_df = disp_df[disp_df['Location'] == user_location]
             
-        if sort_choice == "Location": disp_df = disp_df.sort_values(by=["Location", "Full Name"])
-        elif sort_choice == "Category": disp_df = disp_df.sort_values(by=["Category", "Full Name"])
-        else: disp_df = disp_df.sort_values(by="Full Name")
+        if not disp_df.empty:                
+            if sort_choice == "Location" and "Location" in disp_df.columns: 
+                disp_df = disp_df.sort_values(by=["Location", "Full Name"])
+            elif sort_choice == "Category" and "Category" in disp_df.columns: 
+                disp_df = disp_df.sort_values(by=["Category", "Full Name"])
+            elif "Full Name" in disp_df.columns: 
+                disp_df = disp_df.sort_values(by="Full Name")
 
         if search:
             disp_df = disp_df[disp_df['Full Name'].str.contains(search, case=False, na=False) | disp_df['SKU'].str.contains(search, na=False)]
@@ -302,3 +306,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
