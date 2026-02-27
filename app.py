@@ -10,7 +10,7 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.8", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.10", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -32,8 +32,10 @@ def send_email(subject, body):
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
             smtp.send_message(msg)
+            return True
     except Exception as e:
         st.error(f"Email failed: {e}")
+        return False
 
 if st.session_state["authentication_status"]:
     username = st.session_state["username"]
@@ -105,12 +107,19 @@ if st.session_state["authentication_status"]:
 
     # --- DASHBOARD HEADER (ADMIN ONLY) ---
     if user_role == "Admin":
-        with st.expander("🛡️ Master Data Sync (Admin Only)", expanded=False):
+        with st.expander("🛡️ Master Data Sync (Admin Only)", expanded=True):
             st.info("Upload files here to sync both locations to Airtable.")
             c_u1, c_u2 = st.columns(2)
             fp = c_u1.file_uploader("PV Square File", type=['xlsx'], key="sync_p")
             fh = c_u2.file_uploader("Canape-Vert Square File", type=['xlsx'], key="sync_h")
             
+            # --- TEST EMAIL BUTTON ---
+            if st.button("🧪 Test Email Settings"):
+                if send_email("Test Subject", "This is a test email from Dressupht ERP."):
+                    st.success("Test email sent successfully!")
+                else:
+                    st.error("Failed to send test email.")
+
             if fp and fh and st.button("🚀 Run Wipe & Sync"):
                 with st.spinner("Processing files and checking for changes..."):
                     d1 = clean_location_data(fp, "Pv")
@@ -187,9 +196,8 @@ if st.session_state["authentication_status"]:
         if search:
             # --- FLEXIBLE SEARCH FIX: TOKENIZE SEARCH QUERY ---
             search_clean = search.strip().lower()
-            search_tokens = search_clean.split() # Splits "12 frontal sbw" into ["12", "frontal", "sbw"]
+            search_tokens = search_clean.split()
             
-            # Filter rows where ALL tokens exist in the Full Name or SKU
             disp_df = disp_df[
                 disp_df.apply(lambda row: all(
                     token in str(row['Full Name']).lower() or 
@@ -350,4 +358,3 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
-
