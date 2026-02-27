@@ -185,11 +185,17 @@ if st.session_state["authentication_status"]:
                 disp_df = disp_df.sort_values(by="Full Name")
 
         if search:
-            # --- ROBUST SEARCH FIX: STRIP SPACES AND LOWERCASE ---
+            # --- FLEXIBLE SEARCH FIX: TOKENIZE SEARCH QUERY ---
             search_clean = search.strip().lower()
+            search_tokens = search_clean.split() # Splits "12 frontal sbw" into ["12", "frontal", "sbw"]
+            
+            # Filter rows where ALL tokens exist in the Full Name or SKU
             disp_df = disp_df[
-                disp_df['Full Name'].str.strip().str.lower().str.contains(search_clean, na=False) | 
-                disp_df['SKU'].str.strip().str.lower().str.contains(search_clean, na=False)
+                disp_df.apply(lambda row: all(
+                    token in str(row['Full Name']).lower() or 
+                    token in str(row['SKU']).lower() 
+                    for token in search_tokens
+                ), axis=1)
             ]
             
         st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
@@ -344,3 +350,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
