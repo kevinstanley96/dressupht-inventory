@@ -8,7 +8,7 @@ import plotly.express as px
 from fpdf import FPDF 
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.1", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.2", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -55,14 +55,28 @@ if st.session_state["authentication_status"]:
             else: break
         return pd.DataFrame(all_records)
 
-    # --- CLEANING LOGIC ---
+    # --- CLEANING LOGIC (STRICT MAPPING) ---
     def clean_location_data(file, loc_name):
         df = pd.read_excel(file, skiprows=1)
+        # 1. FIX: Strip spaces from all column names immediately
         df.columns = [str(c).strip() for c in df.columns]
+        
         mapping = {'Item Name': 'Wig Name', 'Variation Name': 'Style', 'SKU': 'SKU', 'Price': 'Price', 'Categories': 'Category'}
         df = df.rename(columns=mapping)
-        stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
-        df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int) if stock_col in df.columns else 0
+        
+        # 2. FIX: STRICT mapping for stock columns
+        if loc_name == "Canape-Vert":
+            stock_col = "Current Quantity Dressup Haiti"
+        else:
+            stock_col = "Current Quantity Dressupht Pv"
+
+        # 3. FIX: Check if column exists, if not show error in UI
+        if stock_col in df.columns:
+            df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int)
+        else:
+            st.error(f"❌ Column '{stock_col}' not found in file. Columns available: {list(df.columns)}")
+            df['Stock'] = 0 
+            
         df['Category'] = df['Category'].fillna("Uncategorized")
         df['Location'] = loc_name
         df['SKU'] = df['SKU'].astype(str).str.strip().replace('nan', 'NO_SKU')
@@ -71,7 +85,7 @@ if st.session_state["authentication_status"]:
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']].copy()
 
-    # --- USER PROFILE ---
+    # --- USER PROFILE & SIDEBAR ---
     roles_df = get_at_data("Role")
     user_row = roles_df[roles_df['User Name'] == username] if not roles_df.empty else pd.DataFrame()
     user_role = "Admin" if username == "Kevin" else (user_row['Access Level'].iloc[0] if not user_row.empty else "Staff")
@@ -82,7 +96,7 @@ if st.session_state["authentication_status"]:
     st.sidebar.divider()
     authenticator.logout('Logout', 'sidebar')
 
-    # --- DYNAMIC TABS SETUP ---
+    # --- TABS SETUP ---
     if user_role == "Admin":
         tab_list = ["📋 Library", "➕ Intake", "🕵️ Audit", "💰 Sales", "🔄 Comparison", "🛡️ Sync", "🔑 Password"]
     elif user_role == "Manager":
@@ -98,12 +112,15 @@ if st.session_state["authentication_status"]:
         c1, c2 = st.columns([2, 1])
         search = c1.text_input("🔍 Search Name/SKU")
         sort_choice = c2.selectbox("Sort By", ["Name", "Location", "Category"])
+        
         disp_df = lib_data.copy()
         if user_role == "Staff" and user_location != "Both":
             disp_df = disp_df[disp_df['Location'] == user_location]
+            
         if sort_choice == "Location": disp_df = disp_df.sort_values(by=["Location", "Full Name"])
         elif sort_choice == "Category": disp_df = disp_df.sort_values(by=["Category", "Full Name"])
         else: disp_df = disp_df.sort_values(by="Full Name")
+
         if search:
             disp_df = disp_df[disp_df['Full Name'].str.contains(search, case=False, na=False) | disp_df['SKU'].str.contains(search, na=False)]
         st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
@@ -114,6 +131,7 @@ if st.session_state["authentication_status"]:
             st.subheader("➕ Stock Intake (PV Tracking)")
             master_data = get_at_data("Master_Inventory")
             col1, col2 = st.columns(2)
+            
             with col1:
                 in_sku = st.text_input("Scan SKU", key="int_sku").strip()
                 if in_sku and in_sku != st.session_state.intake_verify["sku"]:
@@ -150,6 +168,7 @@ if st.session_state["authentication_status"]:
             with ca:
                 counter = st.selectbox("Counter Name", usernames_list)
                 a_sku = st.text_input("SKU to Audit", key="aud_sku").strip()
+                
                 if a_sku and a_sku != st.session_state.audit_verify["sku"]:
                     match = master_data[(master_data['SKU'] == a_sku) & (master_data['Location'] == "Pv")]
                     if not match.empty:
@@ -237,7 +256,7 @@ if st.session_state["authentication_status"]:
                 st.dataframe(
                     merged_comp[['Category', 'Full Name', 'Stock_CV', 'SKU_CV', 'Stock_PV', 'SKU_PV', 'Status']],
                     column_config={
-                        "Stock_CV": "Stock (Canape-Vert)",
+                        "Stock_CV": "Stock (CV)",
                         "Stock_PV": "Stock (PV)",
                         "SKU_CV": "SKU (CV)",
                         "SKU_PV": "SKU (PV)"
@@ -250,11 +269,11 @@ if st.session_state["authentication_status"]:
                 low_pv = len(merged_comp[(merged_comp['Stock_PV'] <= 1) & (merged_comp['Stock_CV'] > 2)])
                 st.metric("Potential Transfer Requests", low_pv)
 
-    # --- TAB 6: SYNC ---
+    # --- TAB 6: SYNC (WIPE & SYNC ENGINE) ---
     if user_role == "Admin":
         with tabs[5]:
             st.subheader("🛡️ Master Data Sync")
-            fp, fh = st.file_uploader("PV File", type=['xlsx'], key="sync_p"), st.file_uploader("Haiti File", type=['xlsx'], key="sync_h")
+            fp, fh = st.file_uploader("PV File", type=['xlsx'], key="sync_p"), st.file_uploader("Canape-Vert File", type=['xlsx'], key="sync_h")
             if fp and fh and st.button("🚀 Run Wipe & Sync"):
                 d1, d2 = clean_location_data(fp, "Pv"), clean_location_data(fh, "Canape-Vert")
                 full = pd.concat([d1, d2]).reset_index(drop=True)
@@ -273,6 +292,7 @@ if st.session_state["authentication_status"]:
                     time.sleep(0.2)
                 st.success("Database Updated")
                 st.cache_data.clear()
+                st.rerun()
 
     # --- TAB 7: PASSWORD ---
     with tabs[-1]:
