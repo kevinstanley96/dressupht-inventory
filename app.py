@@ -8,7 +8,7 @@ import plotly.express as px
 from fpdf import FPDF 
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.4", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.5", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -58,19 +58,13 @@ if st.session_state["authentication_status"]:
         mapping = {'Item Name': 'Wig Name', 'Variation Name': 'Style', 'SKU': 'SKU', 'Price': 'Price', 'Categories': 'Category'}
         df = df.rename(columns=mapping)
         
-        # 1. MAPPING CHECK
-        if loc_name == "Canape-Vert":
-            stock_col = "Current Quantity Dressup Haiti"
-        else:
-            stock_col = "Current Quantity Dressupht Pv"
-
+        stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
         if stock_col in df.columns:
             df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int)
         else:
             df['Stock'] = 0 
             
         df['Category'] = df['Category'].fillna("Uncategorized")
-        # 2. ENSURE LOCATION IS SET
         df['Location'] = loc_name
         df['SKU'] = df['SKU'].astype(str).str.strip().replace('nan', 'NO_SKU')
         w_name, s_name = df['Wig Name'].astype(str).replace('nan', 'Unknown'), df['Style'].astype(str).replace('nan', '')
@@ -89,6 +83,9 @@ if st.session_state["authentication_status"]:
     st.sidebar.divider()
     authenticator.logout('Logout', 'sidebar')
 
+    # --- APP TITLE ---
+    st.title("DRESSUP HAITI STOCK SYSTEM")
+
     # --- DASHBOARD HEADER (ADMIN ONLY) ---
     if user_role == "Admin":
         with st.expander("🛡️ Master Data Sync (Admin Only)", expanded=False):
@@ -101,22 +98,13 @@ if st.session_state["authentication_status"]:
                 with st.spinner("Processing files..."):
                     d1 = clean_location_data(fp, "Pv")
                     d2 = clean_location_data(fh, "Canape-Vert")
-                    
-                    # 3. CONCATENATE SAFELY
                     full = pd.concat([d1, d2], ignore_index=True)
-                    
-                    # Debug: Show user what was processed
-                    st.write(f"Processed PV: {len(d1)} items")
-                    st.write(f"Processed CV: {len(d2)} items")
-                    st.write(f"Total to upload: {len(full)} items")
-
                     old = get_at_data("Master_Inventory")
                     if not old.empty:
                         for i in range(0, len(old), 10):
                             batch = old['id'].tolist()[i:i+10]
                             q = "&".join([f"records[]={rid}" for rid in batch])
                             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{q}", headers=HEADERS)
-                    
                     prog = st.progress(0)
                     for i in range(0, len(full), 10):
                         chunk = full.iloc[i:i+10]
@@ -128,19 +116,19 @@ if st.session_state["authentication_status"]:
                     st.cache_data.clear()
                     st.rerun()
 
-    # --- TABS SETUP ---
+    # --- TABS SETUP (No Icons) ---
     if user_role == "Admin":
-        tab_list = ["📋 Library", "➕ Intake", "🕵️ Audit", "💰 Sales", "🔄 Comparison", "🔑 Password"]
+        tab_list = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Password"]
     elif user_role == "Manager":
-        tab_list = ["📋 Library", "➕ Intake", "🕵️ Audit", "🔄 Comparison", "🔑 Password"]
+        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Password"]
     else:
-        tab_list = ["📋 Library", "🔑 Password"]
+        tab_list = ["Library", "Password"]
     tabs = st.tabs(tab_list)
 
     # --- TAB 1: LIBRARY ---
     with tabs[0]:
         lib_data = get_at_data("Master_Inventory")
-        st.subheader(f"📦 Inventory ({len(lib_data)} Items)")
+        st.subheader(f"Inventory ({len(lib_data)} Items)")
         c1, c2 = st.columns([2, 1])
         search = c1.text_input("🔍 Search Name/SKU")
         sort_choice = c2.selectbox("Sort By", ["Name", "Location", "Category"])
@@ -164,7 +152,7 @@ if st.session_state["authentication_status"]:
     # --- TAB 2: INTAKE (PERSISTENT) ---
     if user_role in ["Admin", "Manager"]:
         with tabs[1]:
-            st.subheader("➕ Stock Intake (PV Tracking)")
+            st.subheader("Stock Intake (PV Tracking)")
             master_data = get_at_data("Master_Inventory")
             col1, col2 = st.columns(2)
             with col1:
@@ -186,7 +174,7 @@ if st.session_state["authentication_status"]:
                         st.toast("Intake Saved!")
                         st.cache_data.clear()
             with col2:
-                st.markdown("### 📜 History")
+                st.markdown("### History")
                 h = get_at_data("Shipments")
                 if not h.empty:
                     h['Date'] = pd.to_datetime(h['Date']).dt.strftime('%Y-%m-%d')
@@ -195,7 +183,7 @@ if st.session_state["authentication_status"]:
     # --- TAB 3: AUDIT (PERSISTENT) ---
     if user_role in ["Admin", "Manager"]:
         with tabs[2]:
-            st.subheader("🕵️ Manual Inventory Audit")
+            st.subheader("Manual Inventory Audit")
             master_data = get_at_data("Master_Inventory")
             ca, cb = st.columns([1, 2])
             with ca:
@@ -229,7 +217,7 @@ if st.session_state["authentication_status"]:
     # --- TAB 4: SALES (DELTA ENGINE) ---
     if user_role == "Admin":
         with tabs[3]:
-            st.subheader("💰 Monday Sales Delta Engine (PV)")
+            st.subheader("Monday Sales Delta Engine (PV)")
             cs1, cs2 = st.columns(2)
             old_f = cs1.file_uploader("OLD Square File", type=['xlsx'], key="old_s")
             new_f = cs2.file_uploader("NEW Square File", type=['xlsx'], key="new_s")
@@ -239,7 +227,7 @@ if st.session_state["authentication_status"]:
                 comp['Sold'] = comp['Stock_old'] - comp['Stock_new']
                 sales_df = comp[comp['Sold'] > 0].copy()
                 if not sales_df.empty:
-                    st.markdown("### 📈 Analysis")
+                    st.markdown("### Analysis")
                     ed_sales = st.data_editor(sales_df[['Category', 'Full Name', 'SKU', 'Sold', 'Price']], hide_index=True)
                     ed_sales['Revenue'] = ed_sales['Sold'] * ed_sales['Price']
                     st.metric("Total Revenue", f"${ed_sales['Revenue'].sum():,.2f}")
@@ -249,7 +237,7 @@ if st.session_state["authentication_status"]:
     # --- TAB 5: COMPARISON (NAME MATCH ENGINE) ---
     if user_role in ["Admin", "Manager"]:
         with tabs[4]:
-            st.subheader("🔄 Stock Comparison: Canape-Vert vs PV")
+            st.subheader("Stock Comparison: Canape-Vert vs PV")
             st.info("Compare stock levels by Wig Name to plan internal transfers.")
             c_comp1, c_comp2 = st.columns(2)
             f_cv = c_comp1.file_uploader("Upload Canape-Vert File", type=['xlsx'], key="comp_cv")
@@ -268,9 +256,45 @@ if st.session_state["authentication_status"]:
                 low_pv = len(merged_comp[(merged_comp['Stock_PV'] <= 1) & (merged_comp['Stock_CV'] > 2)])
                 st.metric("Potential Transfer Requests", low_pv)
 
-    # --- TAB 6: PASSWORD ---
+    # --- TAB 6: FAST/SLOW (NEW TAB) ---
+    if user_role in ["Admin", "Manager"]:
+        with tabs[5]:
+            st.subheader("Fast & Slow Moving Wigs")
+            st.info("Upload Old and New files to analyze sales speed.")
+            
+            cs1, cs2 = st.columns(2)
+            old_fs = cs1.file_uploader("OLD Square File", type=['xlsx'], key="fs_old")
+            new_fs = cs2.file_uploader("NEW Square File", type=['xlsx'], key="fs_new")
+            
+            if old_fs and new_fs:
+                # Use PV location for sales speed analysis
+                df_o = clean_location_data(old_fs, "Pv")
+                df_n = clean_location_data(new_fs, "Pv")
+                
+                # Merge and calculate sold quantity
+                comp = pd.merge(df_o, df_n[['SKU', 'Stock']], on='SKU', suffixes=('_old', '_new'))
+                comp['Sold'] = comp['Stock_old'] - comp['Stock_new']
+                
+                # --- FAST MOVING ---
+                st.markdown("### 🚀 Top Selling Items")
+                fast_df = comp.sort_values(by="Sold", ascending=False)
+                
+                c_f1, c_f2 = st.columns(2)
+                c_f1.dataframe(fast_df.head(5)[['Full Name', 'Sold']], hide_index=True, use_container_width=True)
+                c_f2.dataframe(fast_df.head(10)[['Full Name', 'Sold']], hide_index=True, use_container_width=True)
+                
+                # --- SLOW MOVING ---
+                st.markdown("### 🐢 Slow Moving Items")
+                # Rule: Sold <= 0 AND Stock_old > 0
+                slow_df = comp[(comp['Sold'] <= 0) & (comp['Stock_old'] > 0)].sort_values(by="Stock_old", ascending=False)
+                
+                c_s1, c_s2 = st.columns(2)
+                c_s1.dataframe(slow_df.head(5)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
+                c_s2.dataframe(slow_df.head(10)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
+
+    # --- TAB 7: PASSWORD ---
     with tabs[-1]:
-        st.subheader("🔑 Password")
+        st.subheader("Password")
         if authenticator.reset_password(username=username, fields={'form_name': 'Update'}):
             st.success('Updated!')
 
