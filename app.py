@@ -6,9 +6,11 @@ from datetime import datetime, date
 import time
 import plotly.express as px
 from fpdf import FPDF 
+import smtplib
+from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.5", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.6", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -17,6 +19,21 @@ credentials['usernames']['Kevin']['password'] = "The$100$Raven"
 
 authenticator = stauth.Authenticate(credentials, "inventory_cookie", "abcdef123456_key", 30)
 name, authentication_status, username = authenticator.login(location='main')
+
+# --- EMAIL NOTIFICATION FUNCTION ---
+def send_email(subject, body):
+    msg = EmailMessage()
+    msg.set_content(body)
+    msg['Subject'] = subject
+    msg['From'] = st.secrets["EMAIL_ADDRESS"]
+    msg['To'] = st.secrets["EMAIL_ADDRESS"] # In production, this would be a list of staff emails
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
+            smtp.send_message(msg)
+    except Exception as e:
+        st.error(f"Email failed: {e}")
 
 if st.session_state["authentication_status"]:
     username = st.session_state["username"]
@@ -95,16 +112,39 @@ if st.session_state["authentication_status"]:
             fh = c_u2.file_uploader("Canape-Vert Square File", type=['xlsx'], key="sync_h")
             
             if fp and fh and st.button("🚀 Run Wipe & Sync"):
-                with st.spinner("Processing files..."):
+                with st.spinner("Processing files and checking for changes..."):
                     d1 = clean_location_data(fp, "Pv")
                     d2 = clean_location_data(fh, "Canape-Vert")
                     full = pd.concat([d1, d2], ignore_index=True)
                     old = get_at_data("Master_Inventory")
+
+                    # --- NOTIFICATION LOGIC: PRICE & NEW STOCK ---
                     if not old.empty:
+                        # Price Check
+                        merged = pd.merge(full, old, on='SKU', suffixes=('_new', '_old'))
+                        price_changes = merged[merged['Price_new'] != merged['Price_old']]
+                        
+                        if not price_changes.empty:
+                            msg = "Price Changes:\n"
+                            for _, r in price_changes.iterrows():
+                                msg += f"- {r['Full Name_new']}: ${r['Price_old']} -> ${r['Price_new']}\n"
+                            send_email("🚨 Price Update Notification", msg)
+                        
+                        # New Stock Check
+                        new_stock = merged[(merged['Stock_old'] == 0) & (merged['Stock_new'] > 0)]
+                        if not new_stock.empty:
+                            msg = "Items Now Back in Stock:\n"
+                            for _, r in new_stock.iterrows():
+                                msg += f"- {r['Full Name_new']} ({r['Location_new']})\n"
+                            send_email("✅ New Stock Arrival", msg)
+
+                        # Delete old records
                         for i in range(0, len(old), 10):
                             batch = old['id'].tolist()[i:i+10]
                             q = "&".join([f"records[]={rid}" for rid in batch])
                             requests.delete(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory?{q}", headers=HEADERS)
+                    
+                    # Upload new records
                     prog = st.progress(0)
                     for i in range(0, len(full), 10):
                         chunk = full.iloc[i:i+10]
@@ -112,7 +152,7 @@ if st.session_state["authentication_status"]:
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Master_Inventory", headers=HEADERS, json={"records": recs})
                         prog.progress(min((i+10)/len(full), 1.0))
                         time.sleep(0.2)
-                    st.success("Database Updated")
+                    st.success("Database Updated and Notifications Sent")
                     st.cache_data.clear()
                     st.rerun()
 
@@ -267,27 +307,20 @@ if st.session_state["authentication_status"]:
             new_fs = cs2.file_uploader("NEW Square File", type=['xlsx'], key="fs_new")
             
             if old_fs and new_fs:
-                # Use PV location for sales speed analysis
                 df_o = clean_location_data(old_fs, "Pv")
                 df_n = clean_location_data(new_fs, "Pv")
                 
-                # Merge and calculate sold quantity
                 comp = pd.merge(df_o, df_n[['SKU', 'Stock']], on='SKU', suffixes=('_old', '_new'))
                 comp['Sold'] = comp['Stock_old'] - comp['Stock_new']
                 
-                # --- FAST MOVING ---
                 st.markdown("### 🚀 Top Selling Items")
                 fast_df = comp.sort_values(by="Sold", ascending=False)
-                
                 c_f1, c_f2 = st.columns(2)
                 c_f1.dataframe(fast_df.head(5)[['Full Name', 'Sold']], hide_index=True, use_container_width=True)
                 c_f2.dataframe(fast_df.head(10)[['Full Name', 'Sold']], hide_index=True, use_container_width=True)
                 
-                # --- SLOW MOVING ---
                 st.markdown("### 🐢 Slow Moving Items")
-                # Rule: Sold <= 0 AND Stock_old > 0
                 slow_df = comp[(comp['Sold'] <= 0) & (comp['Stock_old'] > 0)].sort_values(by="Stock_old", ascending=False)
-                
                 c_s1, c_s2 = st.columns(2)
                 c_s1.dataframe(slow_df.head(5)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
                 c_s2.dataframe(slow_df.head(10)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
