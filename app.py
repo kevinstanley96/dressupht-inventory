@@ -247,10 +247,15 @@ if st.session_state["authentication_status"]:
                     st.success(f"**Item:** {st.session_state.intake_verify['name']}")
                 with st.form("int_form", clear_on_submit=True):
                     in_qty = st.number_input("Qty Received", min_value=1)
+                    
+                    # --- MANUAL DATE SELECTION WIDGET ---
+                    selected_date = st.date_input("Select Date Received", value=date.today())
+                    
                     if st.form_submit_button("Record Intake") and st.session_state.intake_verify["name"]:
-                        payload = {"records": [{"fields": {"Date": str(date.today()), "SKU": in_sku, "Wig Name": st.session_state.intake_verify["name"], "Category": st.session_state.intake_verify["cat"], "Quantity": in_qty, "User": username, "Location": "Pv"}}]}
+                        # Uses selected date instead of current date
+                        payload = {"records": [{"fields": {"Date": str(selected_date), "SKU": in_sku, "Wig Name": st.session_state.intake_verify["name"], "Category": st.session_state.intake_verify["cat"], "Quantity": in_qty, "User": username, "Location": "Pv"}}]}
                         requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=payload)
-                        st.toast("Intake Saved!")
+                        st.toast(f"Intake Saved for {selected_date}!")
                         st.cache_data.clear()
             with col2:
                 st.markdown("### History")
@@ -375,3 +380,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
