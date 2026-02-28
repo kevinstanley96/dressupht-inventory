@@ -9,7 +9,7 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.11.14", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.11.15", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -172,12 +172,14 @@ if st.session_state["authentication_status"]:
                     st.cache_data.clear()
                     st.rerun()
 
-    # --- TABS SETUP ---
-    tab_list = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Password"]
-    if user_role == "Manager":
-        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Password"]
-    elif user_role == "Staff":
-        tab_list = ["Library", "Password"]
+   # --- TABS SETUP ---
+    # Add "Exposed" to all lists
+    tab_list = ["Library", "Exposed", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Password"]
+    if user_role == "Manager":                
+        tab_list = ["Library", "Exposed", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Password"]
+    elif user_role == "Staff":                
+        tab_list = ["Library", "Exposed", "Password"]
+    
     tabs = st.tabs(tab_list)
 
     # --- TAB 1: LIBRARY ---
@@ -213,7 +215,71 @@ if st.session_state["authentication_status"]:
             
         st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
-    # --- TAB 2: INTAKE ---
+    # --- TAB 2: EXPOSED WIGS (New Tab) ---
+    with tabs[1]:
+        st.subheader("📋 Exposed Wigs Registry")
+        
+        # Fetch current exposed wigs
+        exposed_data = get_at_data("Exposed_Wigs")
+        
+        # Filter for current user's location if Staff
+        if user_role == "Staff" and user_location != "Both":
+            exposed_display = exposed_data[exposed_data['Location'] == user_location]
+        else:
+            exposed_display = exposed_data
+            
+        st.dataframe(exposed_display[['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Update']], use_container_width=True)
+
+        st.divider()
+        st.markdown("### ✍️ Log/Update Exposed Wig")
+        
+        with st.form("exposed_form", clear_on_submit=True):
+            col_a, col_b = st.columns(2)
+            e_sku = col_a.text_input("SKU").strip()
+            e_qty = col_b.number_input("Quantity", min_value=0)
+            
+            # Auto-fill name based on Master Inventory if possible
+            master_data = get_at_data("Master_Inventory")
+            match = master_data[master_data['SKU'].str.strip().str.lower() == e_sku.lower()]
+            e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown"
+            
+            st.write(f"**Item Name:** {e_name}")
+            
+            e_loc = st.selectbox("Location", ["Pv", "Canape-Vert"])
+            
+            submit = st.form_submit_button("Update Exposed Record")
+            
+            if submit and e_sku:
+                # Logic to Add/Update in Airtable
+                existing = exposed_data[
+                    (exposed_data['SKU'] == e_sku) & 
+                    (exposed_data['Location'] == e_loc)
+                ]
+                
+                payload = {
+                    "fields": {
+                        "SKU": e_sku,
+                        "Full Name": e_name,
+                        "Quantity": e_qty,
+                        "Location": e_loc,
+                        "Last_Update": str(datetime.now())
+                    }
+                }
+                
+                if not existing.empty:
+                    # Update existing record
+                    record_id = existing['id'].iloc[0]
+                    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Exposed_Wigs/{record_id}", headers=HEADERS, json=payload)
+                    st.success(f"Updated {e_name} in {e_loc}")
+                else:
+                    # Create new record
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Exposed_Wigs", headers=HEADERS, json={"records": [payload]})
+                    st.success(f"Added {e_name} to {e_loc}")
+                
+                st.cache_data.clear()
+                st.rerun()
+
+    # --- TAB 3: INTAKE ---
     if user_role in ["Admin", "Manager"]:
         with tabs[1]:
             st.subheader("Stock Intake (PV Tracking)")
@@ -247,7 +313,7 @@ if st.session_state["authentication_status"]:
                     h['Date'] = pd.to_datetime(h['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(h[['Date', 'SKU', 'Wig Name', 'Quantity']], hide_index=True)
 
-    # --- TAB 3: AUDIT ---
+    # --- TAB 4: AUDIT ---
     if user_role in ["Admin", "Manager"]:
         with tabs[2]:
             st.subheader("Manual Inventory Audit")
@@ -283,7 +349,7 @@ if st.session_state["authentication_status"]:
                     aud_h['Date'] = pd.to_datetime(aud_h['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(aud_h.sort_values(by="Date", ascending=False), hide_index=True)
 
-    # --- TAB 4: SALES ---
+    # --- TAB 5: SALES ---
     if user_role == "Admin":
         with tabs[3]:
             st.subheader("Monday Sales Delta Engine (PV)")
@@ -303,7 +369,7 @@ if st.session_state["authentication_status"]:
                     st.plotly_chart(px.pie(ed_sales, values='Revenue', names='Category', hole=0.4, title="Revenue by Category"))
                 else: st.warning("No sales detected.")
 
-    # --- TAB 5: COMPARISON ---
+    # --- TAB 6: COMPARISON ---
     if user_role in ["Admin", "Manager"]:
         with tabs[4]:
             st.subheader("Stock Comparison: Canape-Vert vs PV")
@@ -324,7 +390,7 @@ if st.session_state["authentication_status"]:
                 low_pv = len(merged_comp[(merged_comp['Stock_PV'] <= 1) & (merged_comp['Stock_CV'] > 2)])
                 st.metric("Potential Transfer Requests", low_pv)
 
-    # --- TAB 6: FAST/SLOW ---
+    # --- TAB 7: FAST/SLOW ---
     if user_role in ["Admin", "Manager"]:
         with tabs[5]:
             st.subheader("Fast & Slow Moving Wigs")
@@ -351,7 +417,7 @@ if st.session_state["authentication_status"]:
                 c_s1.dataframe(slow_df.head(5)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
                 c_s2.dataframe(slow_df.head(10)[['Full Name', 'Stock_old']], hide_index=True, use_container_width=True)
 
-    # --- TAB 7: BIG DEPOT ---
+    # --- TAB 8: BIG DEPOT ---
     if user_role in ["Admin", "Manager"]:
         with tabs[6]:
             st.subheader("Depot Inventory Tracking")
@@ -409,7 +475,7 @@ if st.session_state["authentication_status"]:
                     depot_data['Date'] = pd.to_datetime(depot_data['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(depot_data.sort_values(by="Date", ascending=False), hide_index=True)
 
-    # --- TAB 8: PASSWORD ---
+    # --- TAB 9: PASSWORD ---
     with tabs[-1]:
         st.subheader("Password")
         if authenticator.reset_password(username=username, fields={'form_name': 'Update'}):
@@ -417,3 +483,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
