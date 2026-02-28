@@ -24,7 +24,7 @@ st.write("Supabase Client Initialized:", supabase)
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
-credentials['usernames']['Kevin']['password'] = "The$100$Raven"
+credentials['usernames']['Kevin']['password'] = "The$100$Raven$"
 
 authenticator = stauth.Authenticate(credentials, "inventory_cookie", "abcdef123456_key", 30)
 name, authentication_status, username = authenticator.login(location='main')
@@ -484,5 +484,6 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
