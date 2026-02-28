@@ -162,30 +162,90 @@ if st.session_state["authentication_status"]:
     # --- TAB: AUDIT ---
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
+            st.subheader("Manual Inventory Audit")
+            
+            # 1. Pre-fetch necessary data for the lookups
+            exp_data = get_sb_data("Exposed_Wigs")
+            dep_data = get_sb_data("Big_Depot")
+            
             ca, cb = st.columns([1, 2])
             with ca:
                 counter = st.selectbox("Counter Name", usernames_list)
                 a_sku = st.text_input("SKU to Audit", key="aud_sku_input").strip()
+                
+                # --- AUTO-LOOKUP LOGIC ---
                 if a_sku and a_sku != st.session_state.audit_verify["sku"]:
+                    # Match in Master Inventory (for Name/System Stock)
                     match = master_inventory[(master_inventory['SKU'].str.lower() == a_sku.lower()) & (master_inventory['Location'] == "Pv")]
+                    
                     if not match.empty:
-                        st.session_state.audit_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sys": int(match['Stock'].iloc[0]), "sku": a_sku}
+                        # A. Get System Stock
+                        sys_qty = int(match['Stock'].iloc[0])
+                        
+                        # B. Look up Exposed Qty for this SKU in PV
+                        exp_qty = 0
+                        if not exp_data.empty:
+                            exp_match = exp_data[(exp_data['SKU'].str.lower() == a_sku.lower()) & (exp_data['Location'] == "Pv")]
+                            exp_qty = int(exp_match['Quantity'].sum()) # Sum in case of multiple entries
+                            
+                        # C. Look up Big Depot Qty (Sum Additions - Subtractions)
+                        depot_qty = 0
+                        if not dep_data.empty:
+                            d_match = dep_data[dep_data['SKU'].str.lower() == a_sku.lower()]
+                            adds = d_match[d_match['Type'] == "Addition"]['Quantity'].sum()
+                            subs = d_match[d_match['Type'] == "Subtraction"]['Quantity'].sum()
+                            depot_qty = int(adds - subs)
+
+                        # Update Session State with found values
+                        st.session_state.audit_verify = {
+                            "name": match['Full Name'].iloc[0], 
+                            "cat": match['Category'].iloc[0], 
+                            "sys": sys_qty, 
+                            "sku": a_sku,
+                            "auto_exp": exp_qty,
+                            "auto_depot": depot_qty
+                        }
                     else:
-                        st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": a_sku}
+                        st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": a_sku, "auto_exp": 0, "auto_depot": 0}
                         st.error("SKU Not Found in Pv")
                 
+                # --- AUDIT FORM ---
                 if st.session_state.audit_verify["name"]:
-                    st.info(f"System Stock: {st.session_state.audit_verify['sys']}")
+                    st.success(f"Item: {st.session_state.audit_verify['name']}")
+                    st.info(f"System Stock (Square): {st.session_state.audit_verify['sys']}")
+                    
                     with st.form("aud_form"):
-                        m, e, r, b = st.number_input("Manual", 0), st.number_input("Exposed", 0), st.number_input("Returns", 0), st.number_input("Big Depot", 0)
+                        # Manual inputs with AUTO-FILLED defaults
+                        m = st.number_input("Manual (On Shelf/Boxes)", min_value=0)
+                        e = st.number_input("Exposed (Auto-filled)", value=st.session_state.audit_verify.get("auto_exp", 0))
+                        r = st.number_input("Returns", min_value=0)
+                        b = st.number_input("Big Depot (Auto-filled)", value=st.session_state.audit_verify.get("auto_depot", 0))
+                        
                         if st.form_submit_button("Save Audit"):
                             tp = m + e + r + b
-                            supabase.table("Inventory_Audit").insert({"Date": str(date.today()), "SKU": a_sku, "Name": st.session_state.audit_verify["name"], "Category": st.session_state.audit_verify["cat"], "Counter_Name": counter, "Total_Physical": tp, "System_Stock": st.session_state.audit_verify["sys"], "Discrepancy": tp - st.session_state.audit_verify["sys"]}).execute()
+                            ds = tp - st.session_state.audit_verify["sys"]
+                            
+                            payload = {
+                                "Date": str(date.today()),
+                                "SKU": a_sku,
+                                "Name": st.session_state.audit_verify["name"],
+                                "Category": st.session_state.audit_verify["cat"],
+                                "Counter_Name": counter,
+                                "Total_Physical": tp,
+                                "System_Stock": st.session_state.audit_verify["sys"],
+                                "Discrepancy": ds
+                            }
+                            
+                            supabase.table("Inventory_Audit").insert(payload).execute()
                             st.cache_data.clear()
-                            st.success("Audit Recorded")
+                            st.success(f"Audit Recorded! Total: {tp} (Diff: {ds})")
+                            st.rerun()
+
             with cb:
+                st.markdown("### Recent Audits")
                 aud_h = get_sb_data("Inventory_Audit")
-                if not aud_h.empty: st.dataframe(aud_h.sort_values(by="Date", ascending=False), hide_index=True)
+                if not aud_h.empty:
+                    st.dataframe(aud_h.sort_values(by="Date", ascending=False), use_container_width=True, hide_index=True)
 
     # --- TAB: SALES (Admin Only) ---
     if "Sales" in tab_list:
@@ -328,4 +388,5 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
