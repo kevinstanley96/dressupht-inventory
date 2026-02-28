@@ -228,7 +228,7 @@ if st.session_state["authentication_status"]:
         else:
             exposed_display = exposed_data
             
-        st.dataframe(exposed_display[['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Update']], use_container_width=True)
+        st.dataframe(exposed_display[['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']], use_container_width=True)
 
         st.divider()
         st.markdown("### ✍️ Log/Update Exposed Wig")
@@ -262,7 +262,7 @@ if st.session_state["authentication_status"]:
                         "Full Name": e_name,
                         "Quantity": e_qty,
                         "Location": e_loc,
-                        "Last_Update": str(datetime.now())
+                        "Last_Updated": str(datetime.now())
                     }
                 }
                 
@@ -483,4 +483,5 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
