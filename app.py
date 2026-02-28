@@ -9,7 +9,7 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v5.1", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v5.1.1", layout="wide")
 
 # --- SUPABASE SETUP ---
 @st.cache_resource
@@ -19,12 +19,16 @@ def init_connection():
     return create_client(url, key)
 
 supabase = init_connection()
-st.write("Supabase Client Initialized:", supabase)
 
 # --- AUTHENTICATION ---
+# Note: Ensure usernames here match the exact case of login
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
+# Adding lowercase version of kevin just in case
+usernames_list = [u.lower() for u in usernames_list]
+
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
-credentials['usernames']['Kevin']['password'] = "The$100$Raven$"
+# Update Kevin's password
+credentials['usernames']['kevin']['password'] = "The$100$Raven"
 
 authenticator = stauth.Authenticate(credentials, "inventory_cookie", "abcdef123456_key", 30)
 name, authentication_status, username = authenticator.login(location='main')
@@ -33,7 +37,6 @@ name, authentication_status, username = authenticator.login(location='main')
 def send_email(subject, body, recipients):
     """Sends an email to a list of recipients."""
     if not recipients:
-        st.warning("No recipients provided.")
         return False
         
     msg = EmailMessage()
@@ -85,19 +88,24 @@ if st.session_state["authentication_status"]:
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']].copy()
 
-    # --- USER PROFILE ---
+    # --- USER PROFILE & ROLE LOGIC ---
     roles_df = get_sb_data("Role")
-    user_row = roles_df[roles_df['User Name'] == username] if not roles_df.empty else pd.DataFrame()
-    user_role = "Admin" if username == "Kevin" else (user_row['Access Level'].iloc[0] if not user_row.empty else "Staff")
-    user_location = user_row['Assigned Location'].iloc[0] if not user_row.empty and 'Assigned Location' in user_row.columns else "Both"
+    
+    # 🛡️ HARDCODED BYPASS FOR KEVIN
+    if username == "kevin":
+        user_role = "Admin"
+        user_location = "Both"
+    else:
+        user_row = roles_df[roles_df['User Name'] == username] if not roles_df.empty else pd.DataFrame()
+        # V5.1.1: Looking for 'Roles' column instead of 'Access Level'
+        user_role = user_row['Roles'].iloc[0] if not user_row.empty and 'Roles' in user_row.columns else "Staff"
+        user_location = user_row['Assigned Location'].iloc[0] if not user_row.empty and 'Assigned Location' in user_row.columns else "Both"
 
     st.sidebar.markdown(f"### 👤 {username}")
     st.sidebar.markdown(f"**📍 Location:** {user_location}")
+    st.sidebar.markdown(f"**🛡️ Role:** {user_role}")
     st.sidebar.divider()
     authenticator.logout('Logout', 'sidebar')
-
-    st.write("DEBUG: Roles Table Fetched:", roles_df)
-    st.write(f"DEBUG: Username={username}, Role={user_role}")
 
     # --- APP TITLE ---
     st.title("DRESSUP HAITI STOCK SYSTEM - SUPABASE")
@@ -110,27 +118,14 @@ if st.session_state["authentication_status"]:
             fp = c_u1.file_uploader("PV Square File", type=['xlsx'], key="sync_p")
             fh = c_u2.file_uploader("Canape-Vert Square File", type=['xlsx'], key="sync_h")
             
-            if st.button("🧪 Test Email to All Staff"):
-                if 'Email' in roles_df.columns:
-                    email_list = roles_df['Email'].dropna().unique().tolist()
-                    if email_list:
-                        st.info(f"Sending test email to: {', '.join(email_list)}")
-                        if send_email("Test Subject - Team Notification", "This is a test email sent to all staff members.", email_list):
-                            st.success("Test emails sent successfully!")
-                        else:
-                            st.error("Failed to send test emails.")
-                    else:
-                        st.warning("No emails found in the Role table.")
-                else:
-                    st.error("No 'Email' column found in Role table.")
-
             if fp and fh and st.button("🚀 Run Wipe & Sync"):
                 with st.spinner("Processing files and updating database..."):
                     d1 = clean_location_data(fp, "Pv")
                     d2 = clean_location_data(fh, "Canape-Vert")
                     full = pd.concat([d1, d2], ignore_index=True)
                     old = get_sb_data("Master_Inventory")
-                    email_list = roles_df['Email'].dropna().unique().tolist()
+                    
+                    email_list = roles_df['Email'].dropna().unique().tolist() if not roles_df.empty and 'Email' in roles_df.columns else []
 
                     if not old.empty:
                         # Email Notifications for Changes
@@ -170,6 +165,7 @@ if st.session_state["authentication_status"]:
         tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
     elif user_role == "Staff":
         tab_list = ["Library", "Exposed", "Password"]
+    
     tabs = st.tabs(tab_list)
 
     # --- TAB 1: LIBRARY ---
@@ -177,7 +173,6 @@ if st.session_state["authentication_status"]:
         lib_data = get_sb_data("Master_Inventory")
         st.subheader(f"Inventory ({len(lib_data)} Items)")
         
-        # --- FIX: Handle Empty Table ---
         if lib_data.empty:
             st.warning("Database is empty. Please run 'Run Wipe & Sync' in the admin panel or add data to Supabase.")
         else:
@@ -416,66 +411,70 @@ if st.session_state["authentication_status"]:
                     st.dataframe(depot_data.sort_values(by="Date", ascending=False), hide_index=True)
 
    # --- TAB 8: EXPOSED WIGS (Supabase) ---
-    with tabs[7]:
-        st.subheader("📋 Exposed Wigs Registry")
-        
-        exposed_data = get_sb_data("Exposed_Wigs")
-        
-        req_cols = ['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']
-        
-        if not exposed_data.empty:
-            if user_role == "Staff" and user_location != "Both":
-                exposed_display = exposed_data[exposed_data['Location'] == user_location]
-            else:
-                exposed_display = exposed_data
-            
-            existing_cols = [c for c in req_cols if c in exposed_display.columns]
-            st.dataframe(exposed_display[existing_cols], use_container_width=True)
-        else:
-            st.warning("No exposed wigs data found.")
-
-        st.divider()
-        st.markdown("### ✍️ Log/Update Exposed Wig")
-        
-        with st.form("exposed_form", clear_on_submit=True):
-            col_a, col_b = st.columns(2)
-            e_sku = col_a.text_input("SKU").strip()
-            e_qty = col_b.number_input("Quantity", min_value=0)
-            
-            master_data = get_sb_data("Master_Inventory")
-            match = master_data[master_data['SKU'].str.strip().str.lower() == e_sku.lower()]
-            e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown"
-            
-            st.write(f"**Item Name:** {e_name}")
-            
-            e_loc = st.selectbox("Location", ["Pv", "Canape-Vert"])
-            
-            submit = st.form_submit_button("Update Exposed Record")
-            
-            if submit and e_sku:
-                existing = exposed_data[
-                    (exposed_data['SKU'].str.strip() == e_sku) & 
-                    (exposed_data['Location'] == e_loc)
-                ]
+    if user_role in ["Admin", "Manager", "Staff"]:
+        # Safety check: ensure tab exists
+        exposed_tab_index = -2 # Index of Exposed in tab_list
+        if len(tabs) > abs(exposed_tab_index) and tab_list[exposed_tab_index] == "Exposed":
+            with tabs[exposed_tab_index]:
+                st.subheader("📋 Exposed Wigs Registry")
                 
-                payload = {
-                    "SKU": e_sku,
-                    "Full Name": e_name,
-                    "Quantity": e_qty,
-                    "Location": e_loc,
-                    "Last_Updated": str(datetime.now())
-                }
+                exposed_data = get_sb_data("Exposed_Wigs")
                 
-                if not existing.empty:
-                    record_id = existing['id'].iloc[0]
-                    supabase.table("Exposed_Wigs").update(payload).eq("id", record_id).execute()
-                    st.success(f"Updated {e_name} in {e_loc}")
+                req_cols = ['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']
+                
+                if not exposed_data.empty:
+                    if user_role == "Staff" and user_location != "Both":
+                        exposed_display = exposed_data[exposed_data['Location'] == user_location]
+                    else:
+                        exposed_display = exposed_data
+                    
+                    existing_cols = [c for c in req_cols if c in exposed_display.columns]
+                    st.dataframe(exposed_display[existing_cols], use_container_width=True)
                 else:
-                    supabase.table("Exposed_Wigs").insert(payload).execute()
-                    st.success(f"Added {e_name} to {e_loc}")
+                    st.warning("No exposed wigs data found.")
+
+                st.divider()
+                st.markdown("### ✍️ Log/Update Exposed Wig")
                 
-                st.cache_data.clear()
-                st.rerun()
+                with st.form("exposed_form", clear_on_submit=True):
+                    col_a, col_b = st.columns(2)
+                    e_sku = col_a.text_input("SKU").strip()
+                    e_qty = col_b.number_input("Quantity", min_value=0)
+                    
+                    master_data = get_sb_data("Master_Inventory")
+                    match = master_data[master_data['SKU'].str.strip().str.lower() == e_sku.lower()]
+                    e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown"
+                    
+                    st.write(f"**Item Name:** {e_name}")
+                    
+                    e_loc = st.selectbox("Location", ["Pv", "Canape-Vert"])
+                    
+                    submit = st.form_submit_button("Update Exposed Record")
+                    
+                    if submit and e_sku:
+                        existing = exposed_data[
+                            (exposed_data['SKU'].str.strip() == e_sku) & 
+                            (exposed_data['Location'] == e_loc)
+                        ]
+                        
+                        payload = {
+                            "SKU": e_sku,
+                            "Full Name": e_name,
+                            "Quantity": e_qty,
+                            "Location": e_loc,
+                            "Last_Updated": str(datetime.now())
+                        }
+                        
+                        if not existing.empty:
+                            record_id = existing['id'].iloc[0]
+                            supabase.table("Exposed_Wigs").update(payload).eq("id", record_id).execute()
+                            st.success(f"Updated {e_name} in {e_loc}")
+                        else:
+                            supabase.table("Exposed_Wigs").insert(payload).execute()
+                            st.success(f"Added {e_name} to {e_loc}")
+                        
+                        st.cache_data.clear()
+                        st.rerun()
 
     # --- TAB 9: PASSWORD ---
     with tabs[-1]:
@@ -485,7 +484,3 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
-
-
-
-
