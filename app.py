@@ -175,6 +175,11 @@ if st.session_state["authentication_status"]:
     # --- TAB 1: LIBRARY ---
     with tabs[0]:
         lib_data = get_sb_data("Master_Inventory")
+        
+        # --- DEBUGGING BLOCK ---
+        st.write("Columns in Database:", lib_data.columns.tolist())
+        # -----------------------
+        
         st.subheader(f"Inventory ({len(lib_data)} Items)")
         c1, c2 = st.columns([2, 1])
         search = c1.text_input("🔍 Search Name/SKU")
@@ -489,3 +494,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
