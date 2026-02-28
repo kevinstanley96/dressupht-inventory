@@ -409,8 +409,10 @@ if st.session_state["authentication_status"]:
                     depot_data['Date'] = pd.to_datetime(depot_data['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(depot_data.sort_values(by="Date", ascending=False), hide_index=True)
 
-    # --- TAB 8: EXPOSED WIGS (Corrected) ---
-    with tabs[1]:
+   # --- TAB 8: EXPOSED WIGS (Corrected) ---
+    # tab_list is: ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
+    # "Exposed" is index 7
+    with tabs[7]:
         st.subheader("📋 Exposed Wigs Registry")
         
         # Fetch current exposed wigs
@@ -465,7 +467,7 @@ if st.session_state["authentication_status"]:
                         "Full Name": e_name,
                         "Quantity": e_qty,
                         "Location": e_loc,
-                        "Last_Updated": str(datetime.now()) # <-- Corrected column name here too
+                        "Last_Updated": str(datetime.now()) # <-- Corrected column name here
                     }
                 }
                 
@@ -490,4 +492,5 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
