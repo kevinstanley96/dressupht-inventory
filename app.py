@@ -19,9 +19,10 @@ credentials['usernames']['Kevin']['password'] = "The$100$Raven"
 authenticator = stauth.Authenticate(credentials, "inventory_cookie", "abcdef123456_key", 30)
 name, authentication_status, username = authenticator.login(location='main')
 
-# --- HELPERS ---
+# --- EMAIL NOTIFICATION FUNCTION ---
 def send_email(subject, body, recipients):
-    if not recipients: return False
+    if not recipients:
+        return False
     msg = EmailMessage()
     msg.set_content(body)
     msg['Subject'] = subject
@@ -32,7 +33,9 @@ def send_email(subject, body, recipients):
             smtp.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
             smtp.send_message(msg)
             return True
-    except: return False
+    except Exception as e:
+        st.error(f"Email failed: {e}")
+        return False
 
 if st.session_state["authentication_status"]:
     # --- SESSION STATE ---
@@ -41,12 +44,13 @@ if st.session_state["authentication_status"]:
     if 'depot_verify' not in st.session_state: st.session_state.depot_verify = {"name": None, "sku": ""}
     if 'cart' not in st.session_state: st.session_state.cart = []
 
+    # --- AIRTABLE CONFIG ---
     try:
         AIR_TOKEN = st.secrets["AIRTABLE_TOKEN"]
         BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
         HEADERS = {"Authorization": f"Bearer {AIR_TOKEN}", "Content-Type": "application/json"}
     except:
-        st.error("Missing Secrets!")
+        st.error("Missing Secrets in Streamlit Cloud!")
         st.stop()
 
     @st.cache_data(ttl=60)
@@ -60,7 +64,8 @@ if st.session_state["authentication_status"]:
             if res.status_code == 200:
                 data = res.json()
                 for r in data.get('records', []):
-                    row = r['fields']; row['id'] = r['id']
+                    row = r['fields']
+                    row['id'] = r['id']
                     all_records.append(row)
                 offset = data.get('offset')
                 if not offset: break
@@ -72,6 +77,7 @@ if st.session_state["authentication_status"]:
         df.columns = [str(c).strip() for c in df.columns]
         mapping = {'Item Name': 'Wig Name', 'Variation Name': 'Style', 'SKU': 'SKU', 'Price': 'Price', 'Categories': 'Category'}
         df = df.rename(columns=mapping)
+        
         stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
         df['Stock'] = pd.to_numeric(df.get(stock_col, 0), errors='coerce').fillna(0).astype(int)
         df['Category'] = df['Category'].fillna("Uncategorized")
@@ -96,15 +102,18 @@ if st.session_state["authentication_status"]:
             exp_val = item_exp['Quantity'].sum()
         return dep_val, exp_val
 
-    # --- USER PROFILE & PERMISSIONS ---
+    # --- USER PROFILE ---
     roles_df = get_at_data("Role")
     user_row = roles_df[roles_df['User Name'] == username] if not roles_df.empty else pd.DataFrame()
     user_role = "Admin" if username == "Kevin" else (user_row['Access Level'].iloc[0] if not user_row.empty else "Staff")
     user_location = user_row['Assigned Location'].iloc[0] if not user_row.empty else "Both"
     exposed_auth = ["Kevin", "Djessie", "Casimir"]
 
-    # --- TABS SETUP ---
-    tab_list = ["Library", "Intake", "Audit", "PoS", "Big Depot", "Comparison", "Fast/Slow", "Sales History", "Password"]
+    st.sidebar.markdown(f"### 👤 {username} ({user_role})")
+    authenticator.logout('Logout', 'sidebar')
+
+    # --- TABS DEFINITION ---
+    tab_list = ["Library", "Intake", "Audit", "PoS", "Big Depot", "Comparison", "Fast/Slow", "Sales History", "Settings"]
     if username in exposed_auth: tab_list.insert(7, "Exposed")
     tabs = st.tabs(tab_list)
 
@@ -152,34 +161,34 @@ if st.session_state["authentication_status"]:
             if not h.empty:
                 st.dataframe(h[['Date', 'SKU', 'Wig Name', 'Quantity']].sort_values(by="Date", ascending=False), hide_index=True)
 
-    # --- TAB 3: AUDIT (THE NEW AUTO-FETCH ENGINE) ---
+    # --- TAB 3: AUDIT (INTEGRATED) ---
     with tabs[2]:
-        st.subheader("Inventory Audit (Floor + Exposed + Depot)")
+        st.subheader("Inventory Audit (Integrated Control)")
         ca, cb = st.columns([1, 2])
         with ca:
-            a_sku = st.text_input("Scan SKU to Audit", key="aud_sku_main").strip()
+            a_sku = st.text_input("Scan SKU to Audit", key="aud_main").strip()
             if a_sku:
                 match = lib_data[(lib_data['SKU'].str.lower() == a_sku.lower()) & (lib_data['Location'] == "Pv")]
                 if not match.empty:
                     item = match.iloc[0]
                     auto_depot, auto_exposed = get_stock_from_subtables(a_sku)
-                    st.success(f"Found: {item['Full Name']}")
-                    with st.form("audit_form_integrated"):
+                    st.success(f"Audit Target: {item['Full Name']}")
+                    with st.form("audit_v4"):
                         f_floor = st.number_input("Floor Count (Manual)", min_value=0)
                         f_exp = st.number_input("Exposed (Fetched)", value=int(auto_exposed))
                         f_depot = st.number_input("Big Depot (Fetched)", value=int(auto_depot))
                         f_returns = st.number_input("Returns", min_value=0)
                         
-                        total_phys = f_floor + f_exp + f_depot + f_returns
-                        sys_stock = int(item['Stock'])
+                        total_p = f_floor + f_exp + f_depot + f_returns
+                        sys_s = int(item['Stock'])
                         
                         if st.form_submit_button("Log Full Audit"):
                             payload = {"records": [{"fields": {
                                 "Date": str(date.today()), "SKU": a_sku, "Name": item['Full Name'],
-                                "Total_Physical": total_phys, "System_Stock": sys_stock, "Discrepancy": total_phys - sys_stock
+                                "Total_Physical": total_p, "System_Stock": sys_s, "Discrepancy": total_p - sys_s
                             }}]}
                             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=payload)
-                            st.success("Audit Logged!"); st.cache_data.clear()
+                            st.success("Audit Recorded!"); st.cache_data.clear()
         with cb:
             aud_h = get_at_data("Inventory_Audit")
             if not aud_h.empty:
@@ -187,9 +196,9 @@ if st.session_state["authentication_status"]:
 
     # --- TAB 4: PoS ---
     with tabs[3]:
-        st.subheader("Point of Sale")
-        c_p1, c_p2 = st.columns(2)
-        with c_p1:
+        st.subheader("Point of Sale (BETA)")
+        c_pos1, c_pos2 = st.columns(2)
+        with c_pos1:
             psku = st.text_input("Scan SKU to Sell").strip()
             if psku:
                 item_match = lib_data[lib_data['SKU'].str.lower() == psku.lower()]
@@ -197,55 +206,71 @@ if st.session_state["authentication_status"]:
                     item = item_match.iloc[0]
                     st.write(f"**Item:** {item['Full Name']} - ${item['Price']}")
                     if st.button("Add to Cart"):
-                        st.session_state.cart.append({"SKU": item['SKU'], "Name": item['Full Name'], "Price": item['Price'], "Qty": 1})
+                        st.session_state.cart.append({"SKU": item['SKU'], "Name": item['Full Name'], "Price": item['Price']})
                         st.rerun()
-        with c_p2:
+        with c_pos2:
             if st.session_state.cart:
                 cart_df = pd.DataFrame(st.session_state.cart)
                 st.table(cart_df[['Name', 'Price']])
-                total = sum(i['Price'] for i in st.session_state.cart)
-                st.metric("Total", f"${total:,.2f}")
-                pay_mode = st.selectbox("Payment", ["Cash", "MonCash", "Card", "Transfer"])
-                if st.button("Complete Checkout"):
+                total_val = sum(i['Price'] for i in st.session_state.cart)
+                st.metric("Total Bill", f"${total_val:,.2f}")
+                pay_mode = st.selectbox("Payment Method", ["Cash", "MonCash", "Card", "Transfer"])
+                if st.button("Complete Transaction"):
                     receipt = f"REC-{int(time.time())}"
                     recs = [{"fields": {"Date": str(date.today()), "Receipt_ID": receipt, "SKU": i['SKU'], "Item_Name": i['Name'], "Quantity": 1, "Price_Sold": i['Price'], "Payment_Method": pay_mode, "Seller": username}} for i in st.session_state.cart]
                     requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Sales_Transactions", headers=HEADERS, json={"records": recs})
                     st.balloons(); st.session_state.cart = []; st.rerun()
+            else:
+                st.info("Cart is empty.")
 
     # --- TAB 5: BIG DEPOT ---
     with tabs[4]:
-        st.subheader("Big Depot Management")
-        with st.form("dep_form"):
+        st.subheader("Big Depot Log")
+        with st.form("depot_move_full"):
             dsku = st.text_input("SKU").strip()
-            dtype = st.selectbox("Action", ["Addition", "Subtraction"])
+            dtype = st.selectbox("Movement Type", ["Addition", "Subtraction"])
             dqty = st.number_input("Quantity", min_value=1)
-            if st.form_submit_button("Update Depot"):
+            if st.form_submit_button("Record Depot Movement"):
                 payload = {"records": [{"fields": {"Date": str(date.today()), "SKU": dsku, "Type": dtype, "Quantity": dqty, "User": username}}]}
                 requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Big_Depot", headers=HEADERS, json=payload)
-                st.success("Depot Updated"); st.cache_data.clear()
+                st.success("Depot Logged"); st.cache_data.clear()
 
-    # --- EXPOSED TAB (DYNAMIC) ---
+    # --- EXPOSED TAB (DYNAMIC POSITION) ---
     if "Exposed" in tab_list:
         with tabs[tab_list.index("Exposed")]:
-            st.subheader("Exposed Wigs Tracker")
-            e_search = st.text_input("Search Wig for Exposure")
+            st.subheader("Exposed Wigs Management")
+            e_search = st.text_input("Search Item to Expose")
             if e_search:
                 e_tokens = e_search.lower().split()
                 e_matches = lib_data[lib_data.apply(lambda r: all(t in str(r['Full Name']).lower() for t in e_tokens), axis=1)]
                 if not e_matches.empty:
-                    e_choice = st.selectbox("Select Item", e_matches['Full Name'].tolist())
+                    e_choice = st.selectbox("Select Target Wig", e_matches['Full Name'].tolist())
                     e_sku = e_matches[e_matches['Full Name'] == e_choice]['SKU'].values[0]
-                    with st.form("exp_form_submit"):
-                        e_qty = st.number_input("Quantity currently exposed", min_value=0)
-                        if st.form_submit_button("Update Exposure"):
+                    with st.form("exp_form_final"):
+                        e_qty = st.number_input("Current Exposed Count", min_value=0)
+                        if st.form_submit_button("Update Exposed Levels"):
                             payload = {"records": [{"fields": {"SKU": e_sku, "Full Name": e_choice, "Quantity": e_qty, "Last_Updated": str(date.today())}}]}
                             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Exposed_Wigs", headers=HEADERS, json=payload)
                             st.success("Exposed Level Updated"); st.cache_data.clear()
 
-    # --- OTHER TABS (COMPARISON, SALES HISTORY, ETC) ---
-    # These sections would follow the same pattern as built in v4.11/v4.12
+    # --- TAB: COMPARISON ---
+    with tabs[tab_list.index("Comparison")]:
+        st.subheader("CV vs PV Comparison")
+        c_c1, c_c2 = st.columns(2)
+        f_cv = c_c1.file_uploader("Upload Canape-Vert Excel", type=['xlsx'])
+        f_pv = c_c2.file_uploader("Upload PV Excel", type=['xlsx'])
+        if f_cv and f_pv:
+            df_cv = clean_location_data(f_cv, "Canape-Vert")
+            df_pv = clean_location_data(f_pv, "Pv")
+            m_comp = pd.merge(df_cv[['Full Name', 'Stock']], df_pv[['Full Name', 'Stock']], on='Full Name', suffixes=('_CV', '_PV'))
+            st.dataframe(m_comp, use_container_width=True)
+
+    # --- TAB: SETTINGS & LOGOUT ---
     with tabs[-1]:
-        st.subheader("User Settings")
+        st.subheader("System Settings")
+        if st.button("Wipe Cache"):
+            st.cache_data.clear()
+            st.success("Cache Cleared")
         authenticator.logout('Logout', 'main')
 
 elif authentication_status is False: st.error('Incorrect Login')
