@@ -215,20 +215,29 @@ if st.session_state["authentication_status"]:
             
         st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
-    # --- TAB 2: EXPOSED WIGS (New Tab) ---
+    # --- TAB 2: EXPOSED WIGS (Corrected) ---
     with tabs[1]:
         st.subheader("📋 Exposed Wigs Registry")
         
         # Fetch current exposed wigs
         exposed_data = get_at_data("Exposed_Wigs")
         
-        # Filter for current user's location if Staff
-        if user_role == "Staff" and user_location != "Both":
-            exposed_display = exposed_data[exposed_data['Location'] == user_location]
-        else:
-            exposed_display = exposed_data
+        # Define required columns based on Airtable
+        req_cols = ['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']
+        
+        # Check if DataFrame is empty or missing columns
+        if not exposed_data.empty and all(col in exposed_data.columns for col in req_cols):
+            # Filter for current user's location if Staff
+            if user_role == "Staff" and user_location != "Both":
+                exposed_display = exposed_data[exposed_data['Location'] == user_location]
+            else:
+                exposed_display = exposed_data
             
-        st.dataframe(exposed_display[['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']], use_container_width=True)
+            st.dataframe(exposed_display[req_cols], use_container_width=True)
+        else:
+            st.warning("No data found or check Airtable column names (SKU, Full Name, Quantity, Location, Last_Updated).")
+            if not exposed_data.empty:                
+                st.write("Columns detected:", list(exposed_data.columns))
 
         st.divider()
         st.markdown("### ✍️ Log/Update Exposed Wig")
@@ -238,7 +247,7 @@ if st.session_state["authentication_status"]:
             e_sku = col_a.text_input("SKU").strip()
             e_qty = col_b.number_input("Quantity", min_value=0)
             
-            # Auto-fill name based on Master Inventory if possible
+            # Auto-fill name based on Master Inventory
             master_data = get_at_data("Master_Inventory")
             match = master_data[master_data['SKU'].str.strip().str.lower() == e_sku.lower()]
             e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown"
@@ -252,7 +261,7 @@ if st.session_state["authentication_status"]:
             if submit and e_sku:
                 # Logic to Add/Update in Airtable
                 existing = exposed_data[
-                    (exposed_data['SKU'] == e_sku) & 
+                    (exposed_data['SKU'].str.strip() == e_sku) & 
                     (exposed_data['Location'] == e_loc)
                 ]
                 
@@ -262,7 +271,7 @@ if st.session_state["authentication_status"]:
                         "Full Name": e_name,
                         "Quantity": e_qty,
                         "Location": e_loc,
-                        "Last_Updated": str(datetime.now())
+                        "Last_Updated": str(datetime.now()) # <-- Corrected column name here too
                     }
                 }
                 
@@ -483,5 +492,6 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
