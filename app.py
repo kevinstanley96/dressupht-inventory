@@ -173,11 +173,11 @@ if st.session_state["authentication_status"]:
                     st.rerun()
 
     # --- TABS SETUP ---
-    tab_list = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Password"]
+    tab_list = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
     if user_role == "Manager":
-        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Password"]
+        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
     elif user_role == "Staff":
-        tab_list = ["Library", "Password"]
+        tab_list = ["Library", "Exposed", "Password"]
     tabs = st.tabs(tab_list)
 
     # --- TAB 1: LIBRARY ---
@@ -409,7 +409,80 @@ if st.session_state["authentication_status"]:
                     depot_data['Date'] = pd.to_datetime(depot_data['Date']).dt.strftime('%Y-%m-%d')
                     st.dataframe(depot_data.sort_values(by="Date", ascending=False), hide_index=True)
 
-    # --- TAB 8: PASSWORD ---
+    # --- TAB 8: EXPOSED WIGS (Corrected) ---
+    with tabs[1]:
+        st.subheader("📋 Exposed Wigs Registry")
+        
+        # Fetch current exposed wigs
+        exposed_data = get_at_data("Exposed_Wigs")
+        
+        # Define required columns based on Airtable
+        req_cols = ['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']
+        
+        # Check if DataFrame is empty or missing columns
+        if not exposed_data.empty and all(col in exposed_data.columns for col in req_cols):
+            # Filter for current user's location if Staff
+            if user_role == "Staff" and user_location != "Both":
+                exposed_display = exposed_data[exposed_data['Location'] == user_location]
+            else:
+                exposed_display = exposed_data
+            
+            st.dataframe(exposed_display[req_cols], use_container_width=True)
+        else:
+            st.warning("No data found or check Airtable column names (SKU, Full Name, Quantity, Location, Last_Updated).")
+            if not exposed_data.empty:                
+                st.write("Columns detected:", list(exposed_data.columns))
+
+        st.divider()
+        st.markdown("### ✍️ Log/Update Exposed Wig")
+        
+        with st.form("exposed_form", clear_on_submit=True):
+            col_a, col_b = st.columns(2)
+            e_sku = col_a.text_input("SKU").strip()
+            e_qty = col_b.number_input("Quantity", min_value=0)
+            
+            # Auto-fill name based on Master Inventory
+            master_data = get_at_data("Master_Inventory")
+            match = master_data[master_data['SKU'].str.strip().str.lower() == e_sku.lower()]
+            e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown"
+            
+            st.write(f"**Item Name:** {e_name}")
+            
+            e_loc = st.selectbox("Location", ["Pv", "Canape-Vert"])
+            
+            submit = st.form_submit_button("Update Exposed Record")
+            
+            if submit and e_sku:
+                # Logic to Add/Update in Airtable
+                existing = exposed_data[
+                    (exposed_data['SKU'].str.strip() == e_sku) & 
+                    (exposed_data['Location'] == e_loc)
+                ]
+                
+                payload = {
+                    "fields": {
+                        "SKU": e_sku,
+                        "Full Name": e_name,
+                        "Quantity": e_qty,
+                        "Location": e_loc,
+                        "Last_Updated": str(datetime.now()) # <-- Corrected column name here too
+                    }
+                }
+                
+                if not existing.empty:
+                    # Update existing record
+                    record_id = existing['id'].iloc[0]
+                    requests.patch(f"https://api.airtable.com/v0/{BASE_ID}/Exposed_Wigs/{record_id}", headers=HEADERS, json=payload)
+                    st.success(f"Updated {e_name} in {e_loc}")
+                else:
+                    # Create new record
+                    requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Exposed_Wigs", headers=HEADERS, json={"records": [payload]})
+                    st.success(f"Added {e_name} to {e_loc}")
+                
+                st.cache_data.clear()
+                st.rerun()
+
+    # --- TAB 9: PASSWORD ---
     with tabs[-1]:
         st.subheader("Password")
         if authenticator.reset_password(username=username, fields={'form_name': 'Update'}):
@@ -417,3 +490,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
