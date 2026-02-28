@@ -9,10 +9,9 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v5.0", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v5.1", layout="wide")
 
 # --- SUPABASE SETUP ---
-# Pre-requisite: Install supabase (pip install supabase)
 @st.cache_resource
 def init_connection():
     url = st.secrets["SUPABASE_URL"]
@@ -22,8 +21,6 @@ def init_connection():
 supabase = init_connection()
 
 # --- AUTHENTICATION ---
-# Note: In a production app, credentials should be moved to a secure database/file,
-# not hardcoded in the script.
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
 credentials['usernames']['Kevin']['password'] = "The$100$Raven"
@@ -62,7 +59,7 @@ if st.session_state["authentication_status"]:
     if 'depot_verify' not in st.session_state: st.session_state.depot_verify = {"name": None, "sku": ""}
 
     # --- SUPABASE DATA FETCHING ---
-    @st.cache_data(ttl=60) # Reduced TTL, Supabase is fast
+    @st.cache_data(ttl=60)
     def get_sb_data(table_name):
         response = supabase.table(table_name).select("*").execute()
         return pd.DataFrame(response.data)
@@ -85,7 +82,6 @@ if st.session_state["authentication_status"]:
         w_name, s_name = df['Wig Name'].astype(str).replace('nan', 'Unknown'), df['Style'].astype(str).replace('nan', '')
         df['Full Name'] = w_name + " (" + s_name + ")"
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
-        # Reorder to match DB columns
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']].copy()
 
     # --- USER PROFILE ---
@@ -155,7 +151,7 @@ if st.session_state["authentication_status"]:
                     supabase.table("Master_Inventory").delete().neq("SKU", "NON_EXISTENT_SKU").execute()                
                     
                     # 2. Insert new data in batches
-                    for i in range(0, len(full), 100): # Supabase handles larger batches better
+                    for i in range(0, len(full), 100):
                         chunk = full.iloc[i:i+100]
                         recs = chunk.to_dict('records')
                         supabase.table("Master_Inventory").insert(recs).execute()
@@ -175,41 +171,40 @@ if st.session_state["authentication_status"]:
     # --- TAB 1: LIBRARY ---
     with tabs[0]:
         lib_data = get_sb_data("Master_Inventory")
-        
-        # --- DEBUGGING BLOCK ---
-        st.write("Columns in Database:", lib_data.columns.tolist())
-        # -----------------------
-        
         st.subheader(f"Inventory ({len(lib_data)} Items)")
-        c1, c2 = st.columns([2, 1])
-        search = c1.text_input("🔍 Search Name/SKU")
-        sort_choice = c2.selectbox("Sort By", ["Name", "Location", "Category"])
         
-        disp_df = lib_data.copy()
-        if user_role == "Staff" and user_location != "Both":
-            disp_df = disp_df[disp_df['Location'] == user_location]
+        # --- FIX: Handle Empty Table ---
+        if lib_data.empty:
+            st.warning("Database is empty. Please run 'Run Wipe & Sync' in the admin panel or add data to Supabase.")
+        else:
+            c1, c2 = st.columns([2, 1])
+            search = c1.text_input("🔍 Search Name/SKU")
+            sort_choice = c2.selectbox("Sort By", ["Name", "Location", "Category"])
             
-        if not disp_df.empty:
-            if sort_choice == "Location" and "Location" in disp_df.columns: 
-                disp_df = disp_df.sort_values(by=["Location", "Full Name"])
-            elif sort_choice == "Category" and "Category" in disp_df.columns: 
-                disp_df = disp_df.sort_values(by=["Category", "Full Name"])
-            elif "Full Name" in disp_df.columns: 
-                disp_df = disp_df.sort_values(by="Full Name")
+            disp_df = lib_data.copy()
+            if user_role == "Staff" and user_location != "Both":
+                disp_df = disp_df[disp_df['Location'] == user_location]
+                
+            if not disp_df.empty:
+                if sort_choice == "Location" and "Location" in disp_df.columns: 
+                    disp_df = disp_df.sort_values(by=["Location", "Full Name"])
+                elif sort_choice == "Category" and "Category" in disp_df.columns: 
+                    disp_df = disp_df.sort_values(by=["Category", "Full Name"])
+                elif "Full Name" in disp_df.columns: 
+                    disp_df = disp_df.sort_values(by="Full Name")
 
-        if search:
-            search_clean = search.strip().lower()
-            search_tokens = search_clean.split()
-            disp_df = disp_df[
-                disp_df.apply(lambda row: all(
-                    token in str(row['Full Name']).lower() or 
-                    token in str(row['SKU']).lower() 
-                    for token in search_tokens
-                ), axis=1)
-            ]
-          # ... inside Tab 1: LIBRARY ...
-    st.write("DEBUG - Columns found in Pandas:", disp_df.columns.tolist()) 
-    st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
+            if search:
+                search_clean = search.strip().lower()
+                search_tokens = search_clean.split()
+                disp_df = disp_df[
+                    disp_df.apply(lambda row: all(
+                        token in str(row['Full Name']).lower() or 
+                        token in str(row['SKU']).lower() 
+                        for token in search_tokens
+                    ), axis=1)
+                ]
+                
+            st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
     # --- TAB 2: INTAKE ---
     if user_role in ["Admin", "Manager"]:
@@ -420,21 +415,16 @@ if st.session_state["authentication_status"]:
     with tabs[7]:
         st.subheader("📋 Exposed Wigs Registry")
         
-        # Fetch current exposed wigs
         exposed_data = get_sb_data("Exposed_Wigs")
         
-        # Define required columns based on DB setup
         req_cols = ['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']
         
-        # Check if DataFrame is empty
         if not exposed_data.empty:
-            # Filter for current user's location if Staff
             if user_role == "Staff" and user_location != "Both":
                 exposed_display = exposed_data[exposed_data['Location'] == user_location]
             else:
                 exposed_display = exposed_data
             
-            # Ensure columns exist in DB output
             existing_cols = [c for c in req_cols if c in exposed_display.columns]
             st.dataframe(exposed_display[existing_cols], use_container_width=True)
         else:
@@ -448,7 +438,6 @@ if st.session_state["authentication_status"]:
             e_sku = col_a.text_input("SKU").strip()
             e_qty = col_b.number_input("Quantity", min_value=0)
             
-            # Auto-fill name based on Master Inventory
             master_data = get_sb_data("Master_Inventory")
             match = master_data[master_data['SKU'].str.strip().str.lower() == e_sku.lower()]
             e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown"
@@ -460,7 +449,6 @@ if st.session_state["authentication_status"]:
             submit = st.form_submit_button("Update Exposed Record")
             
             if submit and e_sku:
-                # Logic to Add/Update in Supabase
                 existing = exposed_data[
                     (exposed_data['SKU'].str.strip() == e_sku) & 
                     (exposed_data['Location'] == e_loc)
@@ -475,12 +463,10 @@ if st.session_state["authentication_status"]:
                 }
                 
                 if not existing.empty:
-                    # Update existing record using ID
                     record_id = existing['id'].iloc[0]
                     supabase.table("Exposed_Wigs").update(payload).eq("id", record_id).execute()
                     st.success(f"Updated {e_name} in {e_loc}")
                 else:
-                    # Create new record
                     supabase.table("Exposed_Wigs").insert(payload).execute()
                     st.success(f"Added {e_name} to {e_loc}")
                 
@@ -495,6 +481,3 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
-
-
-
