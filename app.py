@@ -9,7 +9,7 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v4.13.0", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v4.13.2", layout="wide")
 
 # --- AUTHENTICATION ---
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
@@ -54,7 +54,8 @@ if st.session_state["authentication_status"]:
         st.error("Missing Secrets!")
         st.stop()
 
-    @st.cache_data(ttl=300)
+    # --- OPTIMIZED DATA FETCH ---
+    @st.cache_data(ttl=60) # Reduced TTL for higher data accuracy
     def get_at_data(table):
         all_records = []
         offset = None
@@ -91,7 +92,7 @@ if st.session_state["authentication_status"]:
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']].copy()
 
-    # --- NEW: AUTO-FETCH LOGIC FOR AUDIT ---
+    # --- AUTO-FETCH LOGIC FOR AUDIT ---
     def get_stock_from_subtables(sku):
         """Checks Big_Depot and Exposed_Wigs for current levels"""
         depot_df = get_at_data("Big_Depot")
@@ -184,24 +185,34 @@ if st.session_state["authentication_status"]:
         with tabs[tab_list.index("Intake")]:
             st.subheader("Stock Intake (PV Tracking)")
             master_data = get_at_data("Master_Inventory")
-            in_sku = st.text_input("Scan SKU", key="int_sku").strip()
-            if in_sku and in_sku != st.session_state.intake_verify["sku"]:
-                match = master_data[(master_data['SKU'].str.lower() == in_sku.lower()) & (master_data['Location'] == "Pv")]
-                if not match.empty:
-                    st.session_state.intake_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
-                else:
-                    st.session_state.intake_verify = {"name": None, "cat": None, "sku": in_sku}
             
-            if st.session_state.intake_verify["name"]:
-                st.success(f"**Item:** {st.session_state.intake_verify['name']}")
-                with st.form("int_form", clear_on_submit=True):
-                    in_qty = st.number_input("Qty Received", min_value=1)
-                    if st.form_submit_button("Record Intake"):
-                        payload = {"records": [{"fields": {"Date": str(date.today()), "SKU": in_sku, "Wig Name": st.session_state.intake_verify["name"], "Quantity": in_qty, "User": username, "Location": "Pv"}}]}
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=payload)
-                        st.toast("Intake Saved!"); st.cache_data.clear()
+            c_int1, c_int2 = st.columns([1, 2])
+            with c_int1:
+                in_sku = st.text_input("Scan SKU", key="int_sku").strip()
+                if in_sku and in_sku != st.session_state.intake_verify["sku"]:
+                    match = master_data[(master_data['SKU'].str.lower() == in_sku.lower()) & (master_data['Location'] == "Pv")]
+                    if not match.empty:
+                        st.session_state.intake_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
+                    else:
+                        st.session_state.intake_verify = {"name": None, "cat": None, "sku": in_sku}
+                
+                if st.session_state.intake_verify["name"]:
+                    st.success(f"**Item:** {st.session_state.intake_verify['name']}")
+                    with st.form("int_form", clear_on_submit=True):
+                        in_qty = st.number_input("Qty Received", min_value=1)
+                        if st.form_submit_button("Record Intake"):
+                            payload = {"records": [{"fields": {"Date": str(date.today()), "SKU": in_sku, "Wig Name": st.session_state.intake_verify["name"], "Quantity": in_qty, "User": username, "Location": "Pv"}}]}
+                            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Shipments", headers=HEADERS, json=payload)
+                            st.toast("Intake Saved!"); st.cache_data.clear()
+            
+            with c_int2:
+                st.markdown("### 📜 Intake History")
+                shipments = get_at_data("Shipments")
+                if not shipments.empty:
+                    shipments['Date'] = pd.to_datetime(shipments['Date']).dt.strftime('%Y-%m-%d')
+                    st.dataframe(shipments.sort_values(by="Date", ascending=False), hide_index=True, use_container_width=True)
 
-    # --- TAB 3: AUDIT (INTEGRATED AUTO-FETCH/UPDATE) ---
+    # --- TAB 3: AUDIT ---
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
             st.subheader("Manual Inventory Audit")
@@ -242,12 +253,22 @@ if st.session_state["authentication_status"]:
                             payload_audit = {"records": [{"fields": {"Date": str(date.today()), "SKU": a_sku, "Name": st.session_state.audit_verify["name"], "Counter_Name": counter, "Total_Physical": tp, "System_Stock": st.session_state.audit_verify["sys"], "Discrepancy": ds}}]}
                             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Inventory_Audit", headers=HEADERS, json=payload_audit)
                             
-                            # 2. Update/Sync Exposed Table with new value entered during audit
+                            # 2. Update/Sync Exposed Table
                             payload_exp = {"records": [{"fields": {"SKU": a_sku, "Full Name": st.session_state.audit_verify["name"], "Quantity": e, "Last_Updated": str(date.today())}}]}
                             requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Exposed_Wigs", headers=HEADERS, json=payload_exp)
                             
-                            st.cache_data.clear()
+                            # Force a cache clear specifically for the audit table
+                            st.cache_data.clear() 
                             st.success("Audit & Exposed records synced!")
+
+            with cb:
+                st.markdown("### 📜 Recent Audit Entries")
+                # Fetches directly without relying only on previous cache
+                aud_h = get_at_data("Inventory_Audit")
+                if not aud_h.empty:
+                    if 'Date' in aud_h.columns:
+                        aud_h['Date'] = pd.to_datetime(aud_h['Date']).dt.strftime('%Y-%m-%d')
+                    st.dataframe(aud_h.sort_values(by="Date", ascending=False), hide_index=True, use_container_width=True)
 
     # --- TAB 4: SALES ---
     if "Sales" in tab_list:
@@ -300,21 +321,30 @@ if st.session_state["authentication_status"]:
     if "Big Depot" in tab_list:
         with tabs[tab_list.index("Big Depot")]:
             st.subheader("Depot Inventory Tracking")
-            d_sku = st.text_input("Scan SKU for Depot", key="dep_sku_input").strip()
-            if d_sku and d_sku != st.session_state.depot_verify["sku"]:
-                match = master_data[master_data['SKU'].str.lower() == d_sku.lower()]
-                if not match.empty:
-                    st.session_state.depot_verify = {"name": match['Full Name'].iloc[0], "sku": d_sku}
+            cd1, cd2 = st.columns([1, 2])
+            with cd1:
+                d_sku = st.text_input("Scan SKU for Depot", key="dep_sku_input").strip()
+                if d_sku and d_sku != st.session_state.depot_verify["sku"]:
+                    match = master_data[master_data['SKU'].str.lower() == d_sku.lower()]
+                    if not match.empty:
+                        st.session_state.depot_verify = {"name": match['Full Name'].iloc[0], "sku": d_sku}
+                
+                if st.session_state.depot_verify["name"]:
+                    st.success(f"**Item:** {st.session_state.depot_verify['name']}")
+                    with st.form("depot_form", clear_on_submit=True):
+                        d_type = st.selectbox("Action", ["Addition", "Subtraction"])
+                        d_qty = st.number_input("Quantity", min_value=1)
+                        if st.form_submit_button("Save Depot Movement"):
+                            payload = {"records": [{"fields": {"Date": str(date.today()), "SKU": d_sku, "Wig Name": st.session_state.depot_verify["name"], "Type": d_type, "Quantity": d_qty, "User": username}}]}
+                            requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Big_Depot", headers=HEADERS, json=payload)
+                            st.cache_data.clear(); st.toast("Depot Movement Saved")
             
-            if st.session_state.depot_verify["name"]:
-                st.success(f"**Item:** {st.session_state.depot_verify['name']}")
-                with st.form("depot_form", clear_on_submit=True):
-                    d_type = st.selectbox("Action", ["Addition", "Subtraction"])
-                    d_qty = st.number_input("Quantity", min_value=1)
-                    if st.form_submit_button("Save Depot Movement"):
-                        payload = {"records": [{"fields": {"Date": str(date.today()), "SKU": d_sku, "Wig Name": st.session_state.depot_verify["name"], "Type": d_type, "Quantity": d_qty, "User": username}}]}
-                        requests.post(f"https://api.airtable.com/v0/{BASE_ID}/Big_Depot", headers=HEADERS, json=payload)
-                        st.cache_data.clear(); st.toast("Depot Movement Saved")
+            with cd2:
+                st.markdown("### 📜 Depot History")
+                depot_h = get_at_data("Big_Depot")
+                if not depot_h.empty:
+                    depot_h['Date'] = pd.to_datetime(depot_h['Date']).dt.strftime('%Y-%m-%d')
+                    st.dataframe(depot_h.sort_values(by="Date", ascending=False), hide_index=True, use_container_width=True)
 
     # --- NEW TAB: EXPOSED (TOKENIZED SEARCH) ---
     if "Exposed" in tab_list:
