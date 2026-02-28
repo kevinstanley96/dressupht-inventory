@@ -207,7 +207,10 @@ if st.session_state["authentication_status"]:
                     for token in search_tokens
                 ), axis=1)
             ]
-            
+          # ... inside Tab 1: LIBRARY ...
+    st.write("DEBUG - Columns found in Pandas:", disp_df.columns.tolist()) 
+    st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
+    
         st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
     # --- TAB 2: INTAKE ---
@@ -494,4 +497,5 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
