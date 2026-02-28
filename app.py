@@ -9,7 +9,7 @@ import smtplib
 from email.message import EmailMessage
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v5.1.1", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v5.1.2", layout="wide")
 
 # --- SUPABASE SETUP ---
 @st.cache_resource
@@ -21,9 +21,7 @@ def init_connection():
 supabase = init_connection()
 
 # --- AUTHENTICATION ---
-# Note: Ensure usernames here match the exact case of login
 usernames_list = ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]
-# Adding lowercase version of kevin just in case
 usernames_list = [u.lower() for u in usernames_list]
 
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
@@ -68,13 +66,23 @@ if st.session_state["authentication_status"]:
         response = supabase.table(table_name).select("*").execute()
         return pd.DataFrame(response.data)
 
+    # --- UPDATED DATA MAPPING ---
     def clean_location_data(file, loc_name):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip() for c in df.columns]
-        mapping = {'Item Name': 'Wig Name', 'Variation Name': 'Style', 'SKU': 'SKU', 'Price': 'Price', 'Categories': 'Category'}
+        
+        # 🛡️ MAPPING BASED ON USER REQUEST
+        mapping = {
+            'Item Name': 'Full Name',
+            'SKU': 'SKU',
+            'Categories': 'Category',
+            'Price': 'Price'
+        }
         df = df.rename(columns=mapping)
         
+        # Determine Stock Column based on location
         stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
+        
         if stock_col in df.columns:
             df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int)
         else:
@@ -82,10 +90,12 @@ if st.session_state["authentication_status"]:
             
         df['Category'] = df['Category'].fillna("Uncategorized")
         df['Location'] = loc_name
-        df['SKU'] = df['SKU'].astype(str).str.strip().replace('nan', 'NO_SKU')
-        w_name, s_name = df['Wig Name'].astype(str).replace('nan', 'Unknown'), df['Style'].astype(str).replace('nan', '')
-        df['Full Name'] = w_name + " (" + s_name + ")"
+        
+        # 🛡️ HANDLING EMPTY SKUs
+        df['SKU'] = df['SKU'].astype(str).str.strip().replace(['nan', ''], 'NO_SKU')
+        
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
+        
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location']].copy()
 
     # --- USER PROFILE & ROLE LOGIC ---
@@ -97,7 +107,6 @@ if st.session_state["authentication_status"]:
         user_location = "Both"
     else:
         user_row = roles_df[roles_df['User Name'] == username] if not roles_df.empty else pd.DataFrame()
-        # V5.1.1: Looking for 'Roles' column instead of 'Access Level'
         user_role = user_row['Roles'].iloc[0] if not user_row.empty and 'Roles' in user_row.columns else "Staff"
         user_location = user_row['Assigned Location'].iloc[0] if not user_row.empty and 'Assigned Location' in user_row.columns else "Both"
 
@@ -127,37 +136,22 @@ if st.session_state["authentication_status"]:
                     
                     email_list = roles_df['Email'].dropna().unique().tolist() if not roles_df.empty and 'Email' in roles_df.columns else []
 
-                    if not old.empty:
-                        # Email Notifications for Changes
-                        merged = pd.merge(full, old, on='SKU', suffixes=('_new', '_old'))
-                        price_changes = merged[merged['Price_new'] != merged['Price_old']]
-                        
-                        if not price_changes.empty:
-                            msg = "Price Changes:\n"
-                            for _, r in price_changes.iterrows():
-                                msg += f"- {r['Full Name_new']}: ${r['Price_old']} -> ${r['Price_new']}\n"
-                            send_email("🚨 Price Update Notification", msg, email_list)
-                        
-                        new_stock = merged[(merged['Stock_old'] == 0) & (merged['Stock_new'] > 0)]
-                        if not new_stock.empty:
-                            msg = "Items Now Back in Stock:\n"
-                            for _, r in new_stock.iterrows():
-                                msg += f"- {r['Full Name_new']} ({r['Location_new']})\n"
-                            send_email("✅ New Stock Arrival", msg, email_list)
-
                     # --- SUPABASE WIPE & SYNC ---
-                    # 1. Delete all existing data
-                    supabase.table("Master_Inventory").delete().neq("SKU", "NON_EXISTENT_SKU").execute()                
-                    
-                    # 2. Insert new data in batches
-                    for i in range(0, len(full), 100):
-                        chunk = full.iloc[i:i+100]
-                        recs = chunk.to_dict('records')
-                        supabase.table("Master_Inventory").insert(recs).execute()
-                    
-                    st.success("Database Updated Successfully")
-                    st.cache_data.clear()
-                    st.rerun()
+                    try:
+                        # 1. Delete all existing data
+                        supabase.table("Master_Inventory").delete().neq("SKU", "NON_EXISTENT_SKU").execute()                
+                        
+                        # 2. Insert new data in batches
+                        for i in range(0, len(full), 100):
+                            chunk = full.iloc[i:i+100]
+                            recs = chunk.to_dict('records')
+                            supabase.table("Master_Inventory").insert(recs).execute()
+                        
+                        st.success("Database Updated Successfully")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Database error: {e}")
 
     # --- TABS SETUP ---
     tab_list = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
