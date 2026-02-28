@@ -96,6 +96,8 @@ if st.session_state["authentication_status"]:
     st.sidebar.divider()
     authenticator.logout('Logout', 'sidebar')
 
+    st.write(f"DEBUG: Username={username}, Role={user_role}")
+
     # --- APP TITLE ---
     st.title("DRESSUP HAITI STOCK SYSTEM - SUPABASE")
 
@@ -482,4 +484,5 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
