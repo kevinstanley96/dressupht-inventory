@@ -139,7 +139,7 @@ if st.session_state["authentication_status"]:
                     # --- SUPABASE WIPE & SYNC ---
                     try:
                         # 1. Delete all existing data
-                        supabase.table("Master_Inventory").delete().neq("SKU", "NON_EXISTENT_SKU").execute()                
+                        supabase.table("Master_Inventory").delete().neq("SKU", "NON_EXISTENT_SKU").execute()                  
                         
                         # 2. Insert new data in batches
                         for i in range(0, len(full), 100):
@@ -360,10 +360,12 @@ if st.session_state["authentication_status"]:
             st.subheader("Depot Inventory Tracking")
             master_data = get_sb_data("Master_Inventory")
             
+            # Fetch data from Supabase for the history view
             depot_data = get_sb_data("Big_Depot")
             
             c_d1, c_d2 = st.columns([1, 2])
             with c_d1:
+                st.markdown("### Log New Movement")
                 d_sku = st.text_input("Scan SKU for Depot", key="dep_sku_input").strip()
                 if d_sku and d_sku != st.session_state.depot_verify["sku"]:
                     match = master_data[master_data['SKU'].str.strip().str.lower() == d_sku.strip().lower()]
@@ -395,14 +397,21 @@ if st.session_state["authentication_status"]:
                             supabase.table("Big_Depot").insert(payload).execute()
                             st.toast(f"✅ {d_type} Saved to Depot!")
                             st.cache_data.clear() # Refresh data
+                            st.rerun()
                         except Exception as e:
                             st.error(f"❌ Failed to save to Supabase: {e}")
 
             with c_d2:
-                st.markdown("### Depot Log")
+                st.markdown("### 📋 Depot Log History")
                 if not depot_data.empty:
-                    depot_data['Date'] = pd.to_datetime(depot_data['Date']).dt.strftime('%Y-%m-%d')
-                    st.dataframe(depot_data.sort_values(by="Date", ascending=False), hide_index=True)
+                    # Format date column for display
+                    if 'Date' in depot_data.columns:
+                        depot_data['Date'] = pd.to_datetime(depot_data['Date']).dt.strftime('%Y-%m-%d')
+                    
+                    # Display the dataframe with container width
+                    st.dataframe(depot_data.sort_values(by="Date", ascending=False), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No movements recorded yet.")
 
    # --- TAB 8: EXPOSED WIGS (Supabase) ---
     if user_role in ["Admin", "Manager", "Staff"]:
