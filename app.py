@@ -255,25 +255,71 @@ if st.session_state["authentication_status"]:
     # --- TAB: EXPOSED ---
     if "Exposed" in tab_list:
         with tabs[tab_list.index("Exposed")]:
-            exp_data = get_sb_data("Exposed_Wigs")
-            if not exp_data.empty:
-                exp_disp = exp_data[exp_data['Location'] == user_location] if user_role == "Staff" and user_location != "Both" else exp_data
-                st.dataframe(exp_disp, use_container_width=True, hide_index=True)
+            st.subheader("📋 Exposed Wigs Registry")
             
-            with st.form("exp_form", clear_on_submit=True):
-                e_sku, e_qty = st.text_input("SKU").strip(), st.number_input("Quantity", 0)
+            # 1. Fetch data
+            exp_data = get_sb_data("Exposed_Wigs")
+            
+            # 2. Safety Check: If empty, create an empty structure so the app doesn't crash
+            if exp_data.empty:
+                exp_data = pd.DataFrame(columns=['id', 'SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated'])
+                st.info("No wigs are currently logged as 'Exposed'. Use the form below to add one.")
+            else:
+                # Filter for Staff view if necessary
+                exp_disp = exp_data.copy()
+                if user_role == "Staff" and user_location != "Both":
+                    exp_disp = exp_disp[exp_disp['Location'] == user_location]
+                
+                # Show the table
+                st.dataframe(exp_disp[['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']], 
+                             use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.markdown("### ✍️ Log New / Update Existing")
+            
+            # 3. Entry Form
+            with st.form("exposed_form", clear_on_submit=True):
+                e_sku = st.text_input("Scan/Type SKU").strip()
+                e_qty = st.number_input("Quantity on Display", min_value=0, step=1)
                 e_loc = st.selectbox("Location", ["Pv", "Canape-Vert"])
-                if st.form_submit_button("Update Record") and e_sku:
-                    match = master_inventory[master_inventory['SKU'].str.lower() == e_sku.lower()]
-                    e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown"
-                    payload = {"SKU": e_sku, "Full Name": e_name, "Quantity": e_qty, "Location": e_loc, "Last_Updated": str(datetime.now())}
-                    existing = exp_data[(exp_data['SKU'] == e_sku) & (exp_data['Location'] == e_loc)]
-                    if not existing.empty:
-                        supabase.table("Exposed_Wigs").update(payload).eq("id", existing['id'].iloc[0]).execute()
+                
+                if st.form_submit_button("Save to Exposed List"):
+                    if not e_sku:
+                        st.error("Please enter a SKU.")
                     else:
-                        supabase.table("Exposed_Wigs").insert(payload).execute()
-                    st.cache_data.clear()
-                    st.rerun()
+                        # Find name from Master Inventory (already loaded at the top of the app)
+                        match = master_inventory[master_inventory['SKU'].str.lower() == e_sku.lower()]
+                        e_name = match['Full Name'].iloc[0] if not match.empty else "Unknown Item"
+                        
+                        # Prepare data
+                        payload = {
+                            "SKU": e_sku,
+                            "Full Name": e_name,
+                            "Quantity": e_qty,
+                            "Location": e_loc,
+                            "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        }
+                        
+                        # Check if this SKU + Location already exists to avoid duplicates
+                        existing_row = exp_data[(exp_data['SKU'] == e_sku) & (exp_data['Location'] == e_loc)]
+                        
+                        try:
+                            if not existing_row.empty:
+                                # Update existing
+                                row_id = existing_row['id'].iloc[0]
+                                supabase.table("Exposed_Wigs").update(payload).eq("id", row_id).execute()
+                                st.success(f"Updated {e_name} quantity.")
+                            else:
+                                # Insert new
+                                supabase.table("Exposed_Wigs").insert(payload).execute()
+                                st.success(f"Added {e_name} to the list.")
+                            
+                            # Refresh app to show new data
+                            st.cache_data.clear()
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error saving to Supabase: {e}")
 
     # --- TAB: PASSWORD ---
     with tabs[tab_list.index("Password")]:
@@ -282,3 +328,4 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
