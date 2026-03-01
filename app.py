@@ -386,7 +386,35 @@ if st.session_state["authentication_status"]:
         if authenticator.reset_password(username=username, fields={'form_name': 'Update'}):
             st.success('Updated!')
 
+    # --- TAB: ADMIN ---
+if "Admin" in tab_list:
+    with tabs[tab_list.index("Admin")]:
+        st.header("🛡️ Administrative Control Panel")
+        
+        # --- SUB-TAB: USER MANAGEMENT ---
+        st.subheader("Manage Staff & Permissions")
+        # Logic to edit user emails, locations, and reset passwords
+        
+        st.divider()                
+
+        # --- SUB-TAB: TASK ASSIGNMENT ---
+        st.subheader("📋 Assign Tasks")
+        # Logic to insert tasks into a new 'User_Tasks' table
+
+        st.divider()
+
+        # --- SUB-TAB: SEND EMAIL ---
+        st.subheader("📧 Send Email")
+        with st.form("email_form"):
+            recipient = st.text_input("To")
+            subject = st.text_input("Subject")
+            body = st.text_area("Message")
+            if st.form_submit_button("Send Email"):
+                # SMTP Python logic here to send the email
+                st.success("Email Sent!")
+
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
