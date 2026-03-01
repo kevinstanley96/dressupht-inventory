@@ -103,7 +103,7 @@ if st.session_state["authentication_status"]:
                     st.rerun()
 
     # 6. Tab Logic
-    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
+    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password", "Admin"]
     if user_role == "Manager":
         tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
     elif user_role == "Staff":
@@ -415,6 +415,7 @@ if "Admin" in tab_list:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
 
