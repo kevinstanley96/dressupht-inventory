@@ -78,9 +78,9 @@ if authentication_status:
     st.title("DRESSUP HAITI STOCK SYSTEM")
 
     # Tabs definition based on Roles
-    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Cleanup"]
+    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed"]
     if user_role == "Manager":
-        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Cleanup"]
+        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed"]
     elif user_role == "Staff":
         tab_list = ["Library", "Exposed"]
     else:
@@ -283,5 +283,6 @@ if authentication_status:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
