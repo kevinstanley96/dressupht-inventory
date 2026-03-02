@@ -108,11 +108,11 @@ if st.session_state["authentication_status"]:
                     st.success("Sync Complete!")
                     st.rerun()
 
-    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password", "Admin", "Cleanup"]
+    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Admin", "Cleanup"]
     if user_role == "Manager":
-        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
+        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed"]
     elif user_role == "Staff":
-        tab_list = ["Library", "Exposed", "Password"]
+        tab_list = ["Library", "Exposed"]
     else:
         tab_list = all_tabs
     
@@ -235,14 +235,8 @@ if st.session_state["authentication_status"]:
                     st.warning(f"Missing SKU: {len(rdf[rdf[c_sku].isna()])}")
                     st.dataframe(rdf[rdf[c_sku].isna()])
 
-    # --- TAB: PASSWORD ---
-    if "Password" in tab_list:
-        with tabs[tab_list.index("Password")]:
-            # 🛡️ FIXED SYNTAX HERE
-            if authenticator.reset_password(username, 'Update Password', fields={'form_name': 'Update Password'}):
-                st.success('Password updated successfully!')
-
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
