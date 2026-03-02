@@ -10,7 +10,7 @@ from email.message import EmailMessage
 import io
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v5.2.2", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v5.2.4", layout="wide")
 
 # --- SUPABASE SETUP ---
 @st.cache_resource
@@ -109,6 +109,7 @@ if st.session_state["authentication_status"]:
                     st.rerun()
 
     all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Admin", "Cleanup"]
+    
     if user_role == "Manager":
         tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed"]
     elif user_role == "Staff":
@@ -118,6 +119,7 @@ if st.session_state["authentication_status"]:
     
     tabs = st.tabs(tab_list)
 
+    # --- LIBRARY TAB ---
     if "Library" in tab_list:
         with tabs[tab_list.index("Library")]:
             c1, c2 = st.columns([2, 1])
@@ -135,6 +137,7 @@ if st.session_state["authentication_status"]:
                 csv_data = disp_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
                 st.download_button("📥 Download CSV", data=csv_data, file_name=f"inventory_{date.today()}.csv", mime='text/csv')
 
+    # --- INTAKE TAB ---
     if "Intake" in tab_list:
         with tabs[tab_list.index("Intake")]:
             in_sku = st.text_input("Scan SKU for Intake").strip()
@@ -143,12 +146,9 @@ if st.session_state["authentication_status"]:
                 if not match.empty:
                     st.success(f"Item: {match['Full Name'].iloc[0]}")
                     with st.form("int_f"):
-                        # Added date selector
                         intake_date = st.date_input("Date of Intake", date.today())
                         qty = st.number_input("Qty", 1)
-                        
                         if st.form_submit_button("Save"):
-                            # 🛡️ Robust Error Handling
                             try:
                                 supabase.table("Shipments").insert({
                                     "Date": str(intake_date), 
@@ -165,7 +165,14 @@ if st.session_state["authentication_status"]:
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Supabase Error: {e}")
+            
+            # HISTORY VIEW
+            st.subheader("Intake History")
+            shipments_hist = get_sb_data("Shipments")
+            if not shipments_hist.empty:
+                st.dataframe(shipments_hist.sort_values(by="Date", ascending=False), hide_index=True)
 
+    # --- AUDIT TAB ---
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
             exp_data = get_sb_data("Exposed_Wigs")
@@ -180,6 +187,7 @@ if st.session_state["authentication_status"]:
                     if not dep_data.empty:
                         d_match = dep_data[dep_data['SKU'].str.lower() == a_sku.lower()]
                         depot_qty = int(d_match[d_match['Type'] == "Addition"]['Quantity'].sum() - d_match[d_match['Type'] == "Subtraction"]['Quantity'].sum())
+                    
                     with st.form("aud_f"):
                         m = st.number_input("Manual", 0)
                         e = st.number_input("Exposed (Auto)", value=exp_qty)
@@ -189,7 +197,75 @@ if st.session_state["authentication_status"]:
                             supabase.table("Inventory_Audit").insert({"Date": str(date.today()), "SKU": a_sku, "Name": match['Full Name'].iloc[0], "Counter_Name": username, "Total_Physical": tp, "System_Stock": sys_qty, "Discrepancy": tp - sys_qty}).execute()
                             st.cache_data.clear()
                             st.rerun()
+            
+            # HISTORY VIEW
+            st.subheader("Audit History")
+            audit_hist = get_sb_data("Inventory_Audit")
+            if not audit_hist.empty:
+                st.dataframe(audit_hist.sort_values(by="Date", ascending=False), hide_index=True)
 
+    # --- SALES TAB (LOGIC CHECK) ---
+    if "Sales" in tab_list:
+        with tabs[tab_list.index("Sales")]:
+            st.subheader("Sales Tracker")
+            cs1, cs2 = st.columns(2)
+            old_f = cs1.file_uploader("OLD Square File", type=['xlsx'], key="old_sales")
+            new_f = cs2.file_uploader("NEW Square File", type=['xlsx'], key="new_sales")
+            
+            if old_f and new_f:
+                df_o = clean_location_data(old_f, "Pv")
+                df_n = clean_location_data(new_f, "Pv")
+                
+                comp = pd.merge(df_o[['SKU', 'Full Name', 'Category', 'Stock', 'Price']], df_n[['SKU', 'Stock']], on='SKU', suffixes=('_old', '_new'))
+                comp['Sold'] = comp['Stock_old'] - comp['Stock_new']
+                sales_df = comp[comp['Sold'] > 0].copy()
+                
+                if not sales_df.empty:
+                    ed_sales = st.data_editor(sales_df[['Category', 'Full Name', 'SKU', 'Sold', 'Price']], hide_index=True)
+                    rev = (ed_sales['Sold'] * ed_sales['Price']).sum()
+                    st.metric("Total Revenue", f"${rev:,.2f}")
+                    st.plotly_chart(px.pie(ed_sales, values='Sold', names='Category', title="Sales by Category"))
+
+    # --- COMPARISON TAB ---
+    if "Comparison" in tab_list:
+        with tabs[tab_list.index("Comparison")]:
+            st.subheader("Stock Discrepancy Checker")
+            c_comp1, c_comp2 = st.columns(2)
+            f_cv = c_comp1.file_uploader("Canape-Vert File", type=['xlsx'], key="c1")
+            f_pv = c_comp2.file_uploader("PV File", type=['xlsx'], key="c2")
+            
+            if f_cv and f_pv:
+                d_cv = clean_location_data(f_cv, "Canape-Vert")
+                d_pv = clean_location_data(f_pv, "Pv")
+                
+                m_comp = pd.merge(d_cv[['Full Name', 'Category', 'Stock', 'SKU']], d_pv[['Full Name', 'Stock', 'SKU']], on='Full Name', how='outer', suffixes=('_CV', '_PV')).fillna(0)
+                
+                sel_cat = st.selectbox("Filter Category", ["All"] + sorted(m_comp['Category'].unique().tolist()))
+                if sel_cat != "All": m_comp = m_comp[m_comp['Category'] == sel_cat]
+                
+                m_comp['Status'] = m_comp.apply(lambda x: "Request Needed" if x['Stock_PV'] == 0 and x['Stock_CV'] > 0 else "Balanced", axis=1)
+                st.dataframe(m_comp, use_container_width=True, hide_index=True)
+
+    # --- FAST/SLOW TAB ---
+    if "Fast/Slow" in tab_list:
+        with tabs[tab_list.index("Fast/Slow")]:
+            st.subheader("Item Velocity")
+            cfs1, cfs2 = st.columns(2)
+            old_fs = cfs1.file_uploader("OLD File", type=['xlsx'], key="f1")
+            new_fs = cfs2.file_uploader("NEW File", type=['xlsx'], key="f2")
+            
+            if old_fs and new_fs:
+                df_o = clean_location_data(old_fs, "Pv")
+                df_n = clean_location_data(new_fs, "Pv")
+                comp = pd.merge(df_o, df_n[['SKU', 'Stock']], on='SKU', suffixes=('_old', '_new'))
+                comp['Sold'] = comp['Stock_old'] - comp['Stock_new']
+                
+                st.subheader("🚀 Top Selling")
+                st.dataframe(comp.sort_values("Sold", ascending=False).head(10)[['Full Name', 'Sold']], hide_index=True)
+                st.subheader("🐢 Slow Moving")
+                st.dataframe(comp[(comp['Sold'] <= 0) & (comp['Stock_old'] > 0)].sort_values("Stock_old", ascending=False).head(10)[['Full Name', 'Stock_old']], hide_index=True)
+
+    # --- BIG DEPOT TAB ---
     if "Big Depot" in tab_list:
         with tabs[tab_list.index("Big Depot")]:
             d_sku = st.text_input("Depot SKU Input").strip()
@@ -198,12 +274,10 @@ if st.session_state["authentication_status"]:
                 if not match.empty:
                     st.success(f"Item: {match['Full Name'].iloc[0]}")
                     with st.form("dep_f"):
-                        # Added date selector
                         depot_date = st.date_input("Date of Action", date.today())
                         dtype = st.selectbox("Type", ["Addition", "Subtraction"])
                         dqty = st.number_input("Qty", 1)
                         if st.form_submit_button("Submit"):
-                            # Using the selected depot_date
                             supabase.table("Big_Depot").insert({
                                 "Date": str(depot_date), 
                                 "SKU": d_sku, 
@@ -214,7 +288,14 @@ if st.session_state["authentication_status"]:
                             }).execute()
                             st.cache_data.clear()
                             st.rerun()
+            
+            # HISTORY VIEW
+            st.subheader("Depot Activity History")
+            depot_hist = get_sb_data("Big_Depot")
+            if not depot_hist.empty:
+                st.dataframe(depot_hist.sort_values(by="Date", ascending=False), hide_index=True)
 
+    # --- EXPOSED TAB ---
     if "Exposed" in tab_list:
         with tabs[tab_list.index("Exposed")]:
             exp_data = get_sb_data("Exposed_Wigs")
@@ -230,6 +311,7 @@ if st.session_state["authentication_status"]:
                     st.cache_data.clear()
                     st.rerun()
 
+    # --- ADMIN TAB ---
     if "Admin" in tab_list:
         with tabs[tab_list.index("Admin")]:
             st.header("Admin Control")
@@ -251,6 +333,7 @@ if st.session_state["authentication_status"]:
                     if st.form_submit_button("Send Email"):
                         if send_email(t_sub, t_msg, [t_to]): st.success("Sent!")
 
+    # --- CLEANUP TAB ---
     if "Cleanup" in tab_list:
         with tabs[tab_list.index("Cleanup")]:
             clean_f = st.file_uploader("Upload Square Export for Audit", type=['xlsx'])
@@ -264,9 +347,3 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
-
-
-
-
-
-
