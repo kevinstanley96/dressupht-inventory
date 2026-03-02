@@ -143,11 +143,23 @@ if st.session_state["authentication_status"]:
                 if not match.empty:
                     st.success(f"Item: {match['Full Name'].iloc[0]}")
                     with st.form("int_f"):
+                        # Added date selector
+                        intake_date = st.date_input("Date of Intake", date.today())
                         qty = st.number_input("Qty", 1)
+                        
                         if st.form_submit_button("Save"):
-                            supabase.table("Shipments").insert({"Date": str(date.today()), "SKU": in_sku, "Wig Name": match['Full Name'].iloc[0], "Category": match['Category'].iloc[0], "Quantity": qty, "User": username, "Location": "Pv"}).execute()
+                            # Using the selected intake_date instead of hardcoded date.today()
+                            supabase.table("Shipments").insert({
+                                "Date": str(intake_date), 
+                                "SKU": in_sku, 
+                                "Wig Name": match['Full Name'].iloc[0], 
+                                "Category": match['Category'].iloc[0], 
+                                "Quantity": qty, 
+                                "User": username, 
+                                "Location": "Pv"
+                            }).execute()
                             st.cache_data.clear()
-                            st.rerun()
+                            st.rerun()rerun()
 
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
@@ -181,10 +193,20 @@ if st.session_state["authentication_status"]:
                 if not match.empty:
                     st.success(f"Item: {match['Full Name'].iloc[0]}")
                     with st.form("dep_f"):
+                        # Added date selector
+                        depot_date = st.date_input("Date of Action", date.today())
                         dtype = st.selectbox("Type", ["Addition", "Subtraction"])
                         dqty = st.number_input("Qty", 1)
                         if st.form_submit_button("Submit"):
-                            supabase.table("Big_Depot").insert({"Date": str(date.today()), "SKU": d_sku, "Wig Name": match['Full Name'].iloc[0], "Type": dtype, "Quantity": dqty, "User": username}).execute()
+                            # Using the selected depot_date
+                            supabase.table("Big_Depot").insert({
+                                "Date": str(depot_date), 
+                                "SKU": d_sku, 
+                                "Wig Name": match['Full Name'].iloc[0], 
+                                "Type": dtype, 
+                                "Quantity": dqty, 
+                                "User": username
+                            }).execute()
                             st.cache_data.clear()
                             st.rerun()
 
@@ -237,6 +259,7 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
 
