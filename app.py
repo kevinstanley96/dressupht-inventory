@@ -78,11 +78,11 @@ if authentication_status:
     st.title("DRESSUP HAITI STOCK SYSTEM")
 
     # Tabs definition based on Roles
-    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
+    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Cleanup"]
     if user_role == "Manager":
-        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
+        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Cleanup"]
     elif user_role == "Staff":
-        tab_list = ["Library", "Exposed", "Password"]
+        tab_list = ["Library", "Exposed"]
     else:
         tab_list = all_tabs
     
@@ -269,11 +269,18 @@ if authentication_status:
                     st.cache_data.clear()
                     st.rerun()
 
-    # --- TAB: PASSWORD ---
-    if "Password" in tab_list:
-        with tabs[tab_list.index("Password")]:
-            if authenticator.reset_password(username=username, fields={'form_name': 'Update'}):
-                st.success('Updated!')
+    # --- TAB: CLEANUP ---
+    if "Cleanup" in tab_list:
+        with tabs[tab_list.index("Cleanup")]:
+            clean_f = st.file_uploader("Upload Square Export for Audit", type=['xlsx'])
+            if clean_f:
+                rdf = pd.read_excel(clean_f, skiprows=1)
+                c_sku = 'SKU' if 'SKU' in rdf.columns else None
+                c_cat = 'Category' if 'Category' in rdf.columns else ('Categories' if 'Categories' in rdf.columns else None)
+                if c_sku and c_cat:
+                    st.warning(f"Missing SKU: {len(rdf[rdf[c_sku].isna()])}")
+                    st.dataframe(rdf[rdf[c_sku].isna()])
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
