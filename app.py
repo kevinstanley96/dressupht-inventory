@@ -113,32 +113,97 @@ if authentication_status:
                 st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
     # --- TAB: INTAKE ---
-    if "Intake" in tab_list:
-        with tabs[tab_list.index("Intake")]:
-            col1, col2 = st.columns(2)
-            with col1:
-                in_sku = st.text_input("Scan SKU", key="int_sku_input").strip()
-                if in_sku and in_sku != st.session_state.intake_verify["sku"]:
-                    match = master_inventory[(master_inventory['SKU'].str.lower() == in_sku.lower()) & (master_inventory['Location'] == "Pv")]
-                    if not match.empty:
-                        st.session_state.intake_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
-                    else:
-                        st.session_state.intake_verify = {"name": None, "cat": None, "sku": in_sku}
-                        st.error("SKU Not Found in Pv")
+if "Intake" in tab_list:
+    with tabs[tab_list.index("Intake")]:
+        st.subheader("📦 Product Intake (PV Location)")
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.markdown("### 📥 Record New Entry")
+            # SKU Input
+            in_sku = st.text_input("Scan or Type SKU", key="int_sku_input").strip()
+            
+            # Logic to find item when SKU changes
+            if in_sku and in_sku != st.session_state.intake_verify["sku"]:
+                # We specifically look for the item in the PV master list
+                match = master_inventory[(master_inventory['SKU'].str.lower() == in_sku.lower()) & (master_inventory['Location'] == "Pv")]
                 
-                if st.session_state.intake_verify["name"]:
-                    st.success(f"**Item:** {st.session_state.intake_verify['name']}")
-                    with st.form("int_form", clear_on_submit=True):
-                        qty, dt = st.number_input("Qty Received", min_value=1), st.date_input("Date", value=date.today())
-                        if st.form_submit_button("Record Intake"):
-                            supabase.table("Shipments").insert({"Date": str(dt), "SKU": in_sku, "Wig Name": st.session_state.intake_verify["name"], "Category": st.session_state.intake_verify["cat"], "Quantity": qty, "User": username, "Location": "Pv"}).execute()
-                            st.cache_data.clear()
-                            st.toast("Intake Saved!")
+                if not match.empty:
+                    st.session_state.intake_verify = {
+                        "name": match['Full Name'].iloc[0], 
+                        "cat": match['Category'].iloc[0], 
+                        "sku": in_sku
+                    }
+                else:
+                    st.session_state.intake_verify = {"name": None, "cat": None, "sku": in_sku}
+                    st.error("SKU Not Found in PV Master Inventory. Please sync master data first.")
+            
+            # Show Form if item is found
+            if st.session_state.intake_verify["name"]:
+                st.success(f"**Item identified:** {st.session_state.intake_verify['name']}")
+                
+                with st.form("intake_submission_form", clear_on_submit=True):
+                    qty = st.number_input("Quantity Received", min_value=1, step=1, value=1)
+                    dt = st.date_input("Date of Arrival", value=date.today())
+                    
+                    submit_button = st.form_submit_button("Confirm & Save to Database")
+                    
+                    if submit_button:
+                        # Prepare the data packet
+                        payload = {
+                            "Date": str(dt), 
+                            "SKU": st.session_state.intake_verify["sku"], 
+                            "Wig Name": st.session_state.intake_verify["name"], 
+                            "Category": str(st.session_state.intake_verify["cat"]), 
+                            "Quantity": int(qty), 
+                            "User": username, 
+                            "Location": "Pv"
+                        }
+                        
+                        try:
+                            # Attempt to insert into Supabase
+                            supabase.table("Shipments").insert(payload).execute()
+                            
+                            # Success Actions
+                            st.cache_data.clear() # Refresh data for the history table
+                            st.toast(f"Successfully added {qty} of {st.session_state.intake_verify['name']}")
+                            time.sleep(1) # Brief pause for user feedback
                             st.rerun()
-            with col2:
-                st.markdown("### Recent Intake")
-                h = get_sb_data("Shipments")
-                if not h.empty: st.dataframe(h[['Date', 'SKU', 'Wig Name', 'Quantity']].sort_values(by="Date", ascending=False), hide_index=True)
+                            
+                        except Exception as e:
+                            # Catching specific database errors (Missing columns, RLS violations, etc)
+                            st.error("⚠️ Database Sync Failed")
+                            st.info(f"Technical Details: {e}")
+                            st.warning("Check if 'Shipments' table in Supabase has these columns: Date, SKU, Wig Name, Category, Quantity, User, Location")
+
+        with col2:
+            st.markdown("### 🕒 Recent Intake History")
+            # Fetch fresh shipment data
+            shipment_history = get_sb_data("Shipments")
+            
+            if not shipment_history.empty:
+                # Basic cleaning for display
+                display_hist = shipment_history.copy()
+                # Ensure date sorting works correctly
+                display_hist = display_hist.sort_values(by="Date", ascending=False)
+                
+                st.dataframe(
+                    display_hist[['Date', 'SKU', 'Wig Name', 'Quantity', 'User']], 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+                
+                # Download option for the history
+                csv = display_hist.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download History CSV",
+                    data=csv,
+                    file_name=f"intake_report_{date.today()}.csv",
+                    mime='text/csv',
+                )
+            else:
+                st.info("No intake records found for this period.")
 
     # --- TAB: AUDIT ---
     if "Audit" in tab_list:
@@ -283,6 +348,7 @@ if authentication_status:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
 
