@@ -10,12 +10,11 @@ from email.message import EmailMessage
 import io
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v5.2.1", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v5.2.2", layout="wide")
 
 # --- SUPABASE SETUP ---
 @st.cache_resource
 def init_connection():
-    # Use st.cache_resource to ensure only ONE connection is kept open
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_connection()
@@ -42,7 +41,6 @@ def send_email(subject, body, recipients):
     msg.set_content(body)
     msg['Subject'], msg['From'], msg['To'] = subject, st.secrets["EMAIL_ADDRESS"], ", ".join(recipients)
     try:
-        # Use st.secrets for SMTP settings
         with smtplib.SMTP(st.secrets.get("SMTP_SERVER", "smtp.gmail.com"), int(st.secrets.get("SMTP_PORT", 587))) as smtp:
             smtp.starttls()
             smtp.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
@@ -53,12 +51,10 @@ def send_email(subject, body, recipients):
         return False
 
 def clean_location_data(file, loc_name):
-    # Use 'with' or read into bytes to ensure the file handle is closed immediately
     file_bytes = file.read()
     df = pd.read_excel(io.BytesIO(file_bytes), skiprows=1)
     df.columns = [str(c).strip() for c in df.columns]
     
-    # Character Sanitizer (Fix â€)
     if 'Item Name' in df.columns:
         df['Item Name'] = (df['Item Name'].astype(str)
                            .str.replace('”', '"').str.replace('“', '"')
@@ -79,7 +75,6 @@ name, authentication_status, username = authenticator.login(location='main')
 
 # --- MAIN APP ---
 if st.session_state["authentication_status"]:
-    # Init Session states
     for key in ['audit_verify', 'intake_verify', 'depot_verify']:
         if key not in st.session_state:
             st.session_state[key] = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
@@ -87,7 +82,6 @@ if st.session_state["authentication_status"]:
     roles_df = get_sb_data("Role")
     master_inventory = get_sb_data("Master_Inventory")
 
-    # Role Logic
     if username == "kevin":
         user_role, user_location = "Admin", "Both"
     else:
@@ -100,7 +94,6 @@ if st.session_state["authentication_status"]:
 
     st.title("DRESSUP HAITI STOCK SYSTEM")
 
-    # Admin Sync
     if user_role == "Admin":
         with st.expander("🛡️ Master Data Sync", expanded=False):
             c_u1, c_u2 = st.columns(2)
@@ -109,16 +102,12 @@ if st.session_state["authentication_status"]:
                 with st.spinner("Processing..."):
                     full = pd.concat([clean_location_data(fp, "Pv"), clean_location_data(fh, "Canape-Vert")], ignore_index=True)
                     supabase.table("Master_Inventory").delete().neq("SKU", "NON_EXISTENT").execute()
-                    
-                    # 🛡️ Errno 24 Prevention: Batching
                     for i in range(0, len(full), 100):
                         supabase.table("Master_Inventory").insert(full.iloc[i:i+100].to_dict('records')).execute()
-                    
                     st.cache_data.clear()
                     st.success("Sync Complete!")
                     st.rerun()
 
-    # Tabs
     all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password", "Admin", "Cleanup"]
     if user_role == "Manager":
         tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
@@ -129,29 +118,23 @@ if st.session_state["authentication_status"]:
     
     tabs = st.tabs(tab_list)
 
-    # --- TAB: LIBRARY ---
     if "Library" in tab_list:
         with tabs[tab_list.index("Library")]:
             c1, c2 = st.columns([2, 1])
             search = c1.text_input("🔍 Search")
             sort_choice = c2.selectbox("Sort By", ["Name", "Category", "Location"])
-            
             disp_df = master_inventory.copy()
             if user_role == "Staff" and user_location != "Both":
                 disp_df = disp_df[disp_df['Location'] == user_location]
-            
             if not disp_df.empty:
                 sort_map = {"Name": "Full Name", "Category": ["Category", "Full Name"], "Location": ["Location", "Full Name"]}
                 disp_df = disp_df.sort_values(by=sort_map[sort_choice])
                 if search:
                     disp_df = disp_df[disp_df.apply(lambda r: search.lower() in str(r['Full Name']).lower() or search.lower() in str(r['SKU']).lower(), axis=1)]
                 st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
-                
-                # Excel-Ready Download
                 csv_data = disp_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
                 st.download_button("📥 Download CSV", data=csv_data, file_name=f"inventory_{date.today()}.csv", mime='text/csv')
 
-    # --- TAB: INTAKE ---
     if "Intake" in tab_list:
         with tabs[tab_list.index("Intake")]:
             in_sku = st.text_input("Scan SKU for Intake").strip()
@@ -166,7 +149,6 @@ if st.session_state["authentication_status"]:
                             st.cache_data.clear()
                             st.rerun()
 
-    # --- TAB: AUDIT ---
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
             exp_data = get_sb_data("Exposed_Wigs")
@@ -181,7 +163,6 @@ if st.session_state["authentication_status"]:
                     if not dep_data.empty:
                         d_match = dep_data[dep_data['SKU'].str.lower() == a_sku.lower()]
                         depot_qty = int(d_match[d_match['Type'] == "Addition"]['Quantity'].sum() - d_match[d_match['Type'] == "Subtraction"]['Quantity'].sum())
-                    
                     with st.form("aud_f"):
                         m = st.number_input("Manual", 0)
                         e = st.number_input("Exposed (Auto)", value=exp_qty)
@@ -192,7 +173,6 @@ if st.session_state["authentication_status"]:
                             st.cache_data.clear()
                             st.rerun()
 
-    # --- TAB: BIG DEPOT ---
     if "Big Depot" in tab_list:
         with tabs[tab_list.index("Big Depot")]:
             d_sku = st.text_input("Depot SKU Input").strip()
@@ -208,7 +188,6 @@ if st.session_state["authentication_status"]:
                             st.cache_data.clear()
                             st.rerun()
 
-    # --- TAB: EXPOSED ---
     if "Exposed" in tab_list:
         with tabs[tab_list.index("Exposed")]:
             exp_data = get_sb_data("Exposed_Wigs")
@@ -224,7 +203,6 @@ if st.session_state["authentication_status"]:
                     st.cache_data.clear()
                     st.rerun()
 
-    # --- TAB: ADMIN ---
     if "Admin" in tab_list:
         with tabs[tab_list.index("Admin")]:
             st.header("Admin Control")
@@ -246,7 +224,6 @@ if st.session_state["authentication_status"]:
                     if st.form_submit_button("Send Email"):
                         if send_email(t_sub, t_msg, [t_to]): st.success("Sent!")
 
-    # --- TAB: CLEANUP ---
     if "Cleanup" in tab_list:
         with tabs[tab_list.index("Cleanup")]:
             clean_f = st.file_uploader("Upload Square Export for Audit", type=['xlsx'])
@@ -261,7 +238,9 @@ if st.session_state["authentication_status"]:
     # --- TAB: PASSWORD ---
     if "Password" in tab_list:
         with tabs[tab_list.index("Password")]:
-            authenticator.reset_password(username, 'Update Password')
+            # 🛡️ FIXED SYNTAX HERE
+            if authenticator.reset_password(username, 'Update Password', fields={'form_name': 'Update Password'}):
+                st.success('Password updated successfully!')
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
