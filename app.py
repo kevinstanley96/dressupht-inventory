@@ -103,7 +103,7 @@ if st.session_state["authentication_status"]:
                     st.rerun()
 
     # 6. Tab Logic
-    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password", "Admin"]
+    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password", "Admin", "Cleanup"]
     if user_role == "Manager":
         tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
     elif user_role == "Staff":
@@ -413,8 +413,44 @@ if "Admin" in tab_list:
                 # SMTP Python logic here to send the email
                 st.success("Email Sent!")
 
+    # --- TAB: CLEANUP ---
+    if "Cleanup" in tab_list:
+        with tabs[tab_list.index("Cleanup")]:
+            st.header("🧹 Square Data Quality Check")
+            st.info("Upload your Square Export to find items missing SKUs or Categories.")
+            
+            cleanup_file = st.file_uploader("Upload Square Excel for Audit", type=['xlsx'], key="cleanup_upload")
+            
+            if cleanup_file:
+                # Load raw data (skip 1 row like your other functions)
+                raw_df = pd.read_excel(cleanup_file, skiprows=1)
+                raw_df.columns = [str(c).strip() for c in raw_df.columns]
+                
+                # Identify issues
+                # 1. Missing SKUs (NaN or empty string)
+                no_sku = raw_df[raw_df['SKU'].isna() | (raw_df['SKU'].astype(str).str.strip() == "")]
+                
+                # 2. Missing Categories
+                no_cat = raw_df[raw_df['Category'].isna() | (raw_df['Category'].astype(str).str.strip() == "")]
+                
+                col_err1, col_err2 = st.columns(2)
+                
+                with col_err1:
+                    st.error(f"⚠️ Items missing SKU: {len(no_sku)}")
+                    if not no_sku.empty:
+                        st.dataframe(no_sku[['Item Name', 'Category']], use_container_width=True)
+                
+                with col_err2:
+                    st.warning(f"📂 Items missing Category: {len(no_cat)}")
+                    if not no_cat.empty:
+                        st.dataframe(no_cat[['Item Name', 'SKU']], use_container_width=True)
+                
+                if no_sku.empty and no_cat.empty:
+                    st.success("✅ Your Square data looks perfect! All items have SKUs and Categories.")
+
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
 
