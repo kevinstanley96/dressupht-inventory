@@ -148,18 +148,23 @@ if st.session_state["authentication_status"]:
                         qty = st.number_input("Qty", 1)
                         
                         if st.form_submit_button("Save"):
-                            # Using the selected intake_date instead of hardcoded date.today()
-                            supabase.table("Shipments").insert({
-                                "Date": str(intake_date), 
-                                "SKU": in_sku, 
-                                "Wig Name": match['Full Name'].iloc[0], 
-                                "Category": match['Category'].iloc[0], 
-                                "Quantity": qty, 
-                                "User": username, 
-                                "Location": "Pv"
-                            }).execute()
-                            st.cache_data.clear()
-                            st.rerun()
+                            # 🛡️ Robust Error Handling
+                            try:
+                                supabase.table("Shipments").insert({
+                                    "Date": str(intake_date), 
+                                    "SKU": in_sku, 
+                                    "Wig Name": match['Full Name'].iloc[0], 
+                                    "Category": match['Category'].iloc[0], 
+                                    "Quantity": qty, 
+                                    "User": username, 
+                                    "Location": "Pv"
+                                }).execute()
+                                st.cache_data.clear()
+                                st.success("Intake Recorded!")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Supabase Error: {e}")
 
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
@@ -259,6 +264,7 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
 
