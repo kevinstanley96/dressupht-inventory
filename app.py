@@ -240,7 +240,8 @@ if st.session_state["authentication_status"]:
         with tabs[tab_list.index("Password")]:
             # 🛡️ FIXED SYNTAX HERE
             if authenticator.reset_password(username, 'Update Password', fields={'form_name': 'Update Password'}):
-                st.success('Password updated successfully!')
+    st.success('Password updated successfully!')
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
