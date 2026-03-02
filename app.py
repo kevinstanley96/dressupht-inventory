@@ -159,7 +159,7 @@ if st.session_state["authentication_status"]:
                                 "Location": "Pv"
                             }).execute()
                             st.cache_data.clear()
-                            st.rerun()rerun()
+                            st.rerun()
 
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
@@ -259,6 +259,7 @@ if st.session_state["authentication_status"]:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
 
 
