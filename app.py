@@ -269,7 +269,7 @@ if authentication_status:
                     st.cache_data.clear()
                     st.rerun()
 
-    # --- TAB: CLEANUP ---
+    # --- CLEANUP TAB ---
     if "Cleanup" in tab_list:
         with tabs[tab_list.index("Cleanup")]:
             clean_f = st.file_uploader("Upload Square Export for Audit", type=['xlsx'])
@@ -283,4 +283,5 @@ if authentication_status:
 
 elif authentication_status is False: st.error('Incorrect Login')
 elif authentication_status is None: st.warning('Please Login')
+
 
