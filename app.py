@@ -144,8 +144,84 @@ if authentication_status:
 
     # --- 2. ARRIVAL TAB ---
     with tabs[1]:
-        st.header("🚢 Arrival")
-        st.write("Placeholder for receiving new shipments.")
+        st.header("🚢 Arrival Management")
+        
+        # Restriction: Only Admins and Managers
+        if role not in ["Admin", "Manager"]:
+            st.warning("🔒 Access Denied. Only Admins and Managers can log new arrivals.")
+        else:
+            # Initialize session state for SKU verification if not exists
+            if 'arrival_verify' not in st.session_state:
+                st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
+
+            col1, col2 = st.columns([1, 2])
+
+            with col1:
+                st.subheader("Log Received Stock")
+                # A. SKU Entry
+                in_sku = st.text_input("Scan or Enter SKU", key="arr_sku_input").strip()
+                
+                # Trigger lookup when SKU changes
+                if in_sku and in_sku != st.session_state.arrival_verify["sku"]:
+                    # Search in Master Inventory (checking PV by default as it's the main intake)
+                    match = master_inventory[master_inventory['SKU'].str.lower() == in_sku.lower()]
+                    
+                    if not match.empty:
+                        # Take the first match found
+                        st.session_state.arrival_verify = {
+                            "name": match['Full Name'].iloc[0],
+                            "cat": match['Category'].iloc[0],
+                            "sku": in_sku
+                        }
+                    else:
+                        st.session_state.arrival_verify = {"name": None, "cat": None, "sku": in_sku}
+                        st.error("SKU not found in Master Inventory. Please check the Library.")
+
+                # B. Data Entry Form (Only shows if SKU is verified)
+                if st.session_state.arrival_verify["name"]:
+                    st.info(f"**Item:** {st.session_state.arrival_verify['name']}\n\n**Category:** {st.session_state.arrival_verify['cat']}")
+                    
+                    with st.form("arrival_form", clear_on_submit=True):
+                        arr_date = st.date_input("Arrival Date", value=date.today())
+                        arr_qty = st.number_input("Quantity Received", min_value=1, step=1)
+                        arr_loc = st.selectbox("Receiving Location", ["Pv", "Canape-Vert"])
+                        
+                        if st.form_submit_button("✅ Confirm Arrival"):
+                            arrival_data = {
+                                "Date": str(arr_date),
+                                "SKU": st.session_state.arrival_verify["sku"],
+                                "Wig Name": st.session_state.arrival_verify["name"],
+                                "Category": st.session_state.arrival_verify["cat"],
+                                "Quantity": arr_qty,
+                                "User": username,
+                                "Location": arr_loc
+                            }
+                            
+                            # Insert into Supabase 'Arrival' table
+                            supabase.table("Arrival").insert(arrival_data).execute()
+                            
+                            st.success(f"Logged {arr_qty} units of {st.session_state.arrival_verify['name']}")
+                            # Clear verification state for next scan
+                            st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
+                            time.sleep(1)
+                            st.rerun()
+
+            with col2:
+                st.subheader("Recent Arrivals")
+                try:
+                    # Fetch logs from the Arrival table
+                    arr_log = supabase.table("Arrival").select("*").order("Date", desc=True).limit(20).execute()
+                    if arr_log.data:
+                        log_df = pd.DataFrame(arr_log.data)
+                        st.dataframe(
+                            log_df[['Date', 'Wig Name', 'Quantity', 'Location', 'User']], 
+                            use_container_width=True, 
+                            hide_index=True
+                        )
+                    else:
+                        st.write("No recent arrivals logged.")
+                except Exception:
+                    st.error("Could not load arrival logs.")
 
     # --- 3. INVENTORY (AUDIT) TAB ---
     with tabs[2]:
@@ -187,6 +263,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
