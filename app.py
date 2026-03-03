@@ -5,12 +5,10 @@ import streamlit_authenticator as stauth
 from datetime import datetime, date
 import time
 import plotly.express as px
-import smtplib
-from email.message import EmailMessage
 import io
 
 # --- CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v5.2.5", layout="wide")
+st.set_page_config(page_title="Dressupht ERP v5.2.9", layout="wide")
 
 # --- SUPABASE SETUP ---
 @st.cache_resource
@@ -20,7 +18,7 @@ def init_connection():
 supabase = init_connection()
 
 # --- AUTHENTICATION SETUP ---
-usernames_list = [u.lower() for u in ["Djessie", "Kevin", "Casimir", "Melchisedek", "David", "Darius", "Eliada", "Sebastien", "Guirlene", "Carmela", "Angelina", "Tamara", "Dorotheline", "Sarah", "Valerie", "Saouda", "Marie France", "Carelle", "Annaelle", "Gerdine", "Martilda"]]
+usernames_list = [u.lower() for u in ["djessie", "kevin", "casimir", "melchisedek", "david", "darius", "eliada", "sebastien", "guirlene", "carmela", "angelina", "tamara", "dorotheline", "sarah", "valerie", "saouda", "marie france", "carelle", "annaelle", "gerdine", "martilda"]]
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
 credentials['usernames']['kevin']['password'] = "The$100$Raven"
 
@@ -36,11 +34,9 @@ def get_sb_data(table_name):
         return pd.DataFrame()
 
 def clean_location_data(file, loc_name):
-    # Ensure we are reading from the start of the file
     file.seek(0)
     df = pd.read_excel(file, skiprows=1)
     df.columns = [str(c).strip() for c in df.columns]
-    
     mapping = {'Item Name': 'Full Name', 'SKU': 'SKU', 'Categories': 'Category', 'Price': 'Price'}
     df = df.rename(columns=mapping)
     
@@ -68,21 +64,19 @@ if authentication_status:
     if username == "kevin":
         user_role, user_location = "Admin", "Both"
     else:
-        user_row = roles_df[roles_df['User Name'] == username] if not roles_df.empty else pd.DataFrame()
+        user_row = roles_df[roles_df['User Name'] == username.lower()] if not roles_df.empty else pd.DataFrame()
         user_role = user_row['Roles'].iloc[0] if not user_row.empty else "Staff"
         user_location = user_row['Assigned Location'].iloc[0] if not user_row.empty else "Both"
 
     st.sidebar.markdown(f"### 👤 {username.title()}\n**📍 Location:** {user_location}\n**🛡️ Role:** {user_role}")
     authenticator.logout('Logout', 'sidebar')
 
-    st.title("DRESSUP HAITI STOCK SYSTEM")
-
-    # Tabs definition based on Roles
-    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed"]
+    # Tabs definition
+    all_tabs = ["Library", "Intake", "Audit", "Sales", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
     if user_role == "Manager":
-        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed"]
+        tab_list = ["Library", "Intake", "Audit", "Comparison", "Fast/Slow", "Big Depot", "Exposed", "Password"]
     elif user_role == "Staff":
-        tab_list = ["Library", "Exposed"]
+        tab_list = ["Library", "Exposed", "Password"]
     else:
         tab_list = all_tabs
     
@@ -91,19 +85,55 @@ if authentication_status:
     # --- TAB: LIBRARY ---
     if "Library" in tab_list:
         with tabs[tab_list.index("Library")]:
-            st.subheader(f"Inventory ({len(master_inventory)} Items)")
+            # --- ADMIN SYNC SECTION ---
+            if user_role in ["Admin", "Manager"]:
+                with st.expander("⬆️ Database Update (Sync Master Inventory)"):
+                    c_up1, c_up2 = st.columns(2)
+                    file_cv = c_up1.file_uploader("Upload Canape-Vert Excel", type=['xlsx'], key="sync_cv")
+                    file_pv = c_up2.file_uploader("Upload PV Excel", type=['xlsx'], key="sync_pv")
+                    
+                    if st.button("🚀 Overwrite Database with New Files"):
+                        if file_cv and file_pv:
+                            with st.spinner("Processing files..."):
+                                df_cv = clean_location_data(file_cv, "Canape-Vert")
+                                df_pv = clean_location_data(file_pv, "Pv")
+                                final_master = pd.concat([df_cv, df_pv], ignore_index=True)
+                                records = final_master.to_dict('records')
+                                
+                                try:
+                                    # Clear and Replace
+                                    supabase.table("Master_Inventory").delete().neq("SKU", "VOID").execute()
+                                    supabase.table("Master_Inventory").insert(records).execute()
+                                    st.success(f"Synced {len(records)} items successfully!")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Sync failed: {e}")
+                        else:
+                            st.warning("Please upload both files.")
+
+            st.divider()
+
+            # --- SEARCH & SORT SECTION ---
+            st.subheader(f"Inventory Library ({len(master_inventory)} Items)")
             c1, c2 = st.columns([2, 1])
             search = c1.text_input("🔍 Search Name/SKU")
-            sort_choice = c2.selectbox("Sort By", ["Name", "Category", "Location"])
+            
+            # SORT PREFERENCE: Default to Name, toggle Category/Date
+            sort_choice = c2.selectbox("Sort By", ["Name", "Category", "Date Entered"])
             
             disp_df = master_inventory.copy()
             if user_role == "Staff" and user_location != "Both":
                 disp_df = disp_df[disp_df['Location'] == user_location]
             
             if not disp_df.empty:
-                # Ensure categories are strings for sorting
                 disp_df['Category'] = disp_df['Category'].fillna("Uncategorized").astype(str)
-                sort_map = {"Name": "Full Name", "Category": ["Category", "Full Name"], "Location": ["Location", "Full Name"]}
+                
+                sort_map = {
+                    "Name": "Full Name", 
+                    "Category": ["Category", "Full Name"], 
+                    "Date Entered": "created_at" if "created_at" in disp_df.columns else "Full Name"
+                }
                 disp_df = disp_df.sort_values(by=sort_map[sort_choice])
                 
                 if search:
@@ -113,102 +143,40 @@ if authentication_status:
                 st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
 
     # --- TAB: INTAKE ---
-if "Intake" in tab_list:
-    with tabs[tab_list.index("Intake")]:
-        st.subheader("📦 Product Intake (PV Location)")
-        
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.markdown("### 📥 Record New Entry")
-            # SKU Input
-            in_sku = st.text_input("Scan or Type SKU", key="int_sku_input").strip()
-            
-            # Logic to find item when SKU changes
-            if in_sku and in_sku != st.session_state.intake_verify["sku"]:
-                # We specifically look for the item in the PV master list
-                match = master_inventory[(master_inventory['SKU'].str.lower() == in_sku.lower()) & (master_inventory['Location'] == "Pv")]
+    if "Intake" in tab_list:
+        with tabs[tab_list.index("Intake")]:
+            col1, col2 = st.columns(2)
+            with col1:
+                in_sku = st.text_input("Scan SKU", key="int_sku_input").strip()
+                if in_sku and in_sku != st.session_state.intake_verify["sku"]:
+                    match = master_inventory[(master_inventory['SKU'].str.lower() == in_sku.lower()) & (master_inventory['Location'] == "Pv")]
+                    if not match.empty:
+                        st.session_state.intake_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
+                    else:
+                        st.session_state.intake_verify = {"name": None, "cat": None, "sku": in_sku}
+                        st.error("SKU Not Found in Pv Master Inventory")
                 
-                if not match.empty:
-                    st.session_state.intake_verify = {
-                        "name": match['Full Name'].iloc[0], 
-                        "cat": match['Category'].iloc[0], 
-                        "sku": in_sku
-                    }
-                else:
-                    st.session_state.intake_verify = {"name": None, "cat": None, "sku": in_sku}
-                    st.error("SKU Not Found in PV Master Inventory. Please sync master data first.")
-            
-            # Show Form if item is found
-            if st.session_state.intake_verify["name"]:
-                st.success(f"**Item identified:** {st.session_state.intake_verify['name']}")
-                
-                with st.form("intake_submission_form", clear_on_submit=True):
-                    qty = st.number_input("Quantity Received", min_value=1, step=1, value=1)
-                    dt = st.date_input("Date of Arrival", value=date.today())
-                    
-                    submit_button = st.form_submit_button("Confirm & Save to Database")
-                    
-                    if submit_button:
-                        # Prepare the data packet
-                        payload = {
-                            "Date": str(dt), 
-                            "SKU": st.session_state.intake_verify["sku"], 
-                            "Wig Name": st.session_state.intake_verify["name"], 
-                            "Category": str(st.session_state.intake_verify["cat"]), 
-                            "Quantity": int(qty), 
-                            "User": username, 
-                            "Location": "Pv"
-                        }
-                        
-                        try:
-                            # Attempt to insert into Supabase
-                            supabase.table("Shipments").insert(payload).execute()
-                            
-                            # Success Actions
-                            st.cache_data.clear() # Refresh data for the history table
-                            st.toast(f"Successfully added {qty} of {st.session_state.intake_verify['name']}")
-                            time.sleep(1) # Brief pause for user feedback
-                            st.rerun()
-                            
-                        except Exception as e:
-                            # Catching specific database errors (Missing columns, RLS violations, etc)
-                            st.error("⚠️ Database Sync Failed")
-                            st.info(f"Technical Details: {e}")
-                            st.warning("Check if 'Shipments' table in Supabase has these columns: Date, SKU, Wig Name, Category, Quantity, User, Location")
-
-        with col2:
-            st.markdown("### 🕒 Recent Intake History")
-            # Fetch fresh shipment data
-            shipment_history = get_sb_data("Shipments")
-            
-            if not shipment_history.empty:
-                # Basic cleaning for display
-                display_hist = shipment_history.copy()
-                # Ensure date sorting works correctly
-                display_hist = display_hist.sort_values(by="Date", ascending=False)
-                
-                st.dataframe(
-                    display_hist[['Date', 'SKU', 'Wig Name', 'Quantity', 'User']], 
-                    use_container_width=True, 
-                    hide_index=True
-                )
-                
-                # Download option for the history
-                csv = display_hist.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download History CSV",
-                    data=csv,
-                    file_name=f"intake_report_{date.today()}.csv",
-                    mime='text/csv',
-                )
-            else:
-                st.info("No intake records found for this period.")
+                if st.session_state.intake_verify["name"]:
+                    st.success(f"**Item:** {st.session_state.intake_verify['name']}")
+                    with st.form("int_form", clear_on_submit=True):
+                        qty, dt = st.number_input("Qty Received", min_value=1), st.date_input("Date", value=date.today())
+                        if st.form_submit_button("Confirm & Save"):
+                            try:
+                                payload = {"Date": str(dt), "SKU": in_sku, "Wig Name": st.session_state.intake_verify["name"], "Category": str(st.session_state.intake_verify["cat"]), "Quantity": qty, "User": username, "Location": "Pv"}
+                                supabase.table("Shipments").insert(payload).execute()
+                                st.cache_data.clear()
+                                st.toast("Saved!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Database Error: {e}")
+            with col2:
+                st.markdown("### Recent Intake History")
+                h = get_sb_data("Shipments")
+                if not h.empty: st.dataframe(h[['Date', 'SKU', 'Wig Name', 'Quantity']].sort_values(by="Date", ascending=False), hide_index=True)
 
     # --- TAB: AUDIT ---
     if "Audit" in tab_list:
         with tabs[tab_list.index("Audit")]:
-            st.subheader("Manual Inventory Audit")
             exp_data, dep_data = get_sb_data("Exposed_Wigs"), get_sb_data("Big_Depot")
             ca, cb = st.columns([1, 2])
             with ca:
@@ -226,129 +194,58 @@ if "Intake" in tab_list:
                         st.session_state.audit_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sys": sys_qty, "sku": a_sku, "auto_exp": exp_qty, "auto_depot": depot_qty}
                     else:
                         st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": a_sku, "auto_exp": 0, "auto_depot": 0}
-                        st.error("SKU Not Found in Pv")
-
+                
                 if st.session_state.audit_verify["name"]:
-                    st.info(f"System Stock: {st.session_state.audit_verify['sys']}")
                     with st.form("aud_form"):
-                        m = st.number_input("Manual (Shelf)", min_value=0)
+                        m = st.number_input("Manual Shelf Count", min_value=0)
                         e = st.number_input("Exposed (Auto)", value=st.session_state.audit_verify["auto_exp"])
                         r = st.number_input("Returns", min_value=0)
                         b = st.number_input("Big Depot (Auto)", value=st.session_state.audit_verify["auto_depot"])
                         if st.form_submit_button("Save Audit"):
                             tp = m + e + r + b
                             ds = tp - st.session_state.audit_verify["sys"]
-                            supabase.table("Inventory_Audit").insert({"Date": str(date.today()), "SKU": a_sku, "Name": st.session_state.audit_verify["name"], "Category": st.session_state.audit_verify["cat"], "Counter_Name": counter, "Total_Physical": tp, "System_Stock": st.session_state.audit_verify["sys"], "Discrepancy": ds}).execute()
+                            supabase.table("Inventory_Audit").insert({"Date": str(date.today()), "SKU": a_sku, "Name": st.session_state.audit_verify["name"], "Category": str(st.session_state.audit_verify["cat"]), "Counter_Name": counter, "Total_Physical": tp, "System_Stock": st.session_state.audit_verify["sys"], "Discrepancy": ds}).execute()
                             st.cache_data.clear()
-                            st.success(f"Recorded! Diff: {ds}")
                             st.rerun()
             with cb:
-                st.markdown("### Recent Audits")
                 aud_h = get_sb_data("Inventory_Audit")
-                if not aud_h.empty: st.dataframe(aud_h.sort_values(by="Date", ascending=False), use_container_width=True, hide_index=True)
-
-    # --- TAB: SALES ---
-    if "Sales" in tab_list:
-        with tabs[tab_list.index("Sales")]:
-            cs1, cs2 = st.columns(2)
-            old_f, new_f = cs1.file_uploader("OLD Square File", type=['xlsx'], key="sales_old"), cs2.file_uploader("NEW Square File", type=['xlsx'], key="sales_new")
-            if old_f and new_f:
-                df_o, df_n = clean_location_data(old_f, "Pv"), clean_location_data(new_f, "Pv")
-                comp = pd.merge(df_o[['SKU', 'Full Name', 'Category', 'Stock', 'Price']], df_n[['SKU', 'Stock']], on='SKU', suffixes=('_old', '_new'))
-                comp['Sold'] = comp['Stock_old'] - comp['Stock_new']
-                sales_df = comp[comp['Sold'] > 0].copy()
-                if not sales_df.empty:
-                    ed_sales = st.data_editor(sales_df[['Category', 'Full Name', 'SKU', 'Sold', 'Price']], hide_index=True)
-                    st.metric("Total Revenue", f"${(ed_sales['Sold'] * ed_sales['Price']).sum():,.2f}")
-                    st.plotly_chart(px.pie(ed_sales, values='Sold', names='Category'))
+                if not aud_h.empty: st.dataframe(aud_h.sort_values(by="Date", ascending=False), hide_index=True)
 
     # --- TAB: COMPARISON ---
     if "Comparison" in tab_list:
         with tabs[tab_list.index("Comparison")]:
             c_comp1, c_comp2 = st.columns(2)
-            f_cv, f_pv = c_comp1.file_uploader("Canape-Vert File", type=['xlsx'], key="c1"), c_comp2.file_uploader("PV File", type=['xlsx'], key="c2")
+            f_cv, f_pv = c_comp1.file_uploader("Canape-Vert Comparison File", type=['xlsx'], key="c1"), c_comp2.file_uploader("PV Comparison File", type=['xlsx'], key="c2")
             if f_cv and f_pv:
                 d_cv, d_pv = clean_location_data(f_cv, "Canape-Vert"), clean_location_data(f_pv, "Pv")
                 m_comp = pd.merge(d_cv[['Full Name', 'Category', 'Stock']], d_pv[['Full Name', 'Stock']], on='Full Name', how='outer', suffixes=('_CV', '_PV')).fillna(0)
-                
-                # Fix: Handle mixed types/NaN in Categories before sorting
-                cats = sorted(m_comp['Category'].astype(str).unique().tolist())
+                m_comp['Category'] = m_comp['Category'].astype(str)
+                cats = sorted(m_comp['Category'].unique().tolist())
                 sel_cat = st.selectbox("Filter Category", ["All"] + cats)
-                
-                if sel_cat != "All": m_comp = m_comp[m_comp['Category'].astype(str) == sel_cat]
+                if sel_cat != "All": m_comp = m_comp[m_comp['Category'] == sel_cat]
                 m_comp['Status'] = m_comp.apply(lambda x: "Request Needed" if x['Stock_PV'] == 0 and x['Stock_CV'] > 0 else "Balanced", axis=1)
                 st.dataframe(m_comp, use_container_width=True, hide_index=True)
-
-    # --- TAB: FAST/SLOW ---
-    if "Fast/Slow" in tab_list:
-        with tabs[tab_list.index("Fast/Slow")]:
-            cfs1, cfs2 = st.columns(2)
-            old_fs, new_fs = cfs1.file_uploader("OLD File", type=['xlsx'], key="f1"), cfs2.file_uploader("NEW File", type=['xlsx'], key="f2")
-            if old_fs and new_fs:
-                df_o, df_n = clean_location_data(old_fs, "Pv"), clean_location_data(new_fs, "Pv")
-                comp = pd.merge(df_o, df_n[['SKU', 'Stock']], on='SKU', suffixes=('_old', '_new'))
-                comp['Sold'] = comp['Stock_old'] - comp['Stock_new']
-                st.subheader("🚀 Top Selling")
-                st.dataframe(comp.sort_values("Sold", ascending=False).head(10)[['Full Name', 'Sold']], hide_index=True)
-                st.subheader("🐢 Slow Moving")
-                st.dataframe(comp[(comp['Sold'] <= 0) & (comp['Stock_old'] > 0)].sort_values("Stock_old", ascending=False).head(10)[['Full Name', 'Stock_old']], hide_index=True)
-
-    # --- TAB: BIG DEPOT ---
-    if "Big Depot" in tab_list:
-        with tabs[tab_list.index("Big Depot")]:
-            depot_data = get_sb_data("Big_Depot")
-            cd1, cd2 = st.columns([1, 2])
-            with cd1:
-                d_sku = st.text_input("Depot SKU", key="dep_sku").strip()
-                if d_sku and d_sku != st.session_state.depot_verify["sku"]:
-                    match = master_inventory[master_inventory['SKU'].str.lower() == d_sku.lower()]
-                    st.session_state.depot_verify = {"name": match['Full Name'].iloc[0] if not match.empty else None, "sku": d_sku}
-                if st.session_state.depot_verify["name"]:
-                    st.success(f"Item: {st.session_state.depot_verify['name']}")
-                    with st.form("dep_form", clear_on_submit=True):
-                        dtype, dqty = st.selectbox("Action", ["Addition", "Subtraction"]), st.number_input("Qty", 1)
-                        if st.form_submit_button("Save"):
-                            supabase.table("Big_Depot").insert({"Date": str(date.today()), "SKU": d_sku, "Wig Name": st.session_state.depot_verify["name"], "Type": dtype, "Quantity": dqty, "User": username}).execute()
-                            st.cache_data.clear()
-                            st.rerun()
-            with cd2:
-                if not depot_data.empty: st.dataframe(depot_data.sort_values("Date", ascending=False), use_container_width=True, hide_index=True)
 
     # --- TAB: EXPOSED ---
     if "Exposed" in tab_list:
         with tabs[tab_list.index("Exposed")]:
             exp_data = get_sb_data("Exposed_Wigs")
             st.dataframe(exp_data[['SKU', 'Full Name', 'Quantity', 'Location', 'Last_Updated']] if not exp_data.empty else pd.DataFrame(), use_container_width=True, hide_index=True)
-            with st.form("exposed_form", clear_on_submit=True):
+            with st.form("exp_form"):
                 e_sku = st.text_input("SKU").strip()
                 e_qty = st.number_input("Qty on Display", min_value=0)
                 e_loc = st.selectbox("Location", ["Pv", "Canape-Vert"])
-                if st.form_submit_button("Save"):
+                if st.form_submit_button("Update"):
                     match = master_inventory[master_inventory['SKU'].str.lower() == e_sku.lower()]
                     payload = {"SKU": e_sku, "Full Name": match['Full Name'].iloc[0] if not match.empty else "Unknown", "Quantity": e_qty, "Location": e_loc, "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")}
-                    existing = exp_data[(exp_data['SKU'] == e_sku) & (exp_data['Location'] == e_loc)] if not exp_data.empty else pd.DataFrame()
-                    if not existing.empty:
-                        supabase.table("Exposed_Wigs").update(payload).eq("id", existing['id'].iloc[0]).execute()
-                    else:
-                        supabase.table("Exposed_Wigs").insert(payload).execute()
+                    supabase.table("Exposed_Wigs").insert(payload).execute()
                     st.cache_data.clear()
                     st.rerun()
 
-    # --- CLEANUP TAB ---
-    if "Cleanup" in tab_list:
-        with tabs[tab_list.index("Cleanup")]:
-            clean_f = st.file_uploader("Upload Square Export for Audit", type=['xlsx'])
-            if clean_f:
-                rdf = pd.read_excel(clean_f, skiprows=1)
-                c_sku = 'SKU' if 'SKU' in rdf.columns else None
-                c_cat = 'Category' if 'Category' in rdf.columns else ('Categories' if 'Categories' in rdf.columns else None)
-                if c_sku and c_cat:
-                    st.warning(f"Missing SKU: {len(rdf[rdf[c_sku].isna()])}")
-                    st.dataframe(rdf[rdf[c_sku].isna()])
+    # --- TAB: PASSWORD ---
+    if "Password" in tab_list:
+        with tabs[tab_list.index("Password")]:
+            authenticator.reset_password(username=username)
 
-elif authentication_status is False: st.error('Incorrect Login')
+elif authentication_status is False: st.error('Incorrect Password')
 elif authentication_status is None: st.warning('Please Login')
-
-
-
-
