@@ -668,57 +668,102 @@ if authentication_status:
 
             # --- SUB-TAB 1: USER MANAGEMENT ---
             with admin_subtab[0]:
-                st.subheader("Manage Team Roles")
+                st.subheader("Manage Team Roles & Locations")
                 try:
+                    # Fetching from 'Role' table with your exact columns
                     users_query = supabase.table("Role").select("*").execute()
                     users_df = pd.DataFrame(users_query.data)
                     
-                    st.dataframe(users_df[['username', 'role']], use_container_width=True, hide_index=True)
-                    
-                    with st.expander("➕ Update User Role"):
-                        target_user = st.selectbox("Select User", users_df['username'].unique())
-                        new_role = st.selectbox("Assign New Role", ["Admin", "Manager", "Staff"])
-                        if st.button("Update Permissions"):
-                            supabase.table("Role").update({"role": new_role}).eq("username", target_user).execute()
-                            st.success(f"Permissions updated for {target_user}")
-                            st.rerun()
-                except:
-                    st.error("Could not load user table.")
+                    if not users_df.empty:
+                        # Displaying your specific columns
+                        st.dataframe(
+                            users_df[['User Name', 'Roles', 'Email', 'Location']], 
+                            use_container_width=True, 
+                            hide_index=True
+                        )
+                        
+                        st.divider()
+                        
+                        col_up1, col_up2 = st.columns(2)
+                        with col_up1:
+                            st.markdown("##### 🔐 Update Permissions")
+                            with st.form("role_update_form"):
+                                target_user = st.selectbox("Select User", users_df['User Name'].unique())
+                                new_role = st.selectbox("Assign New Role", ["Admin", "Manager", "Staff"])
+                                if st.form_submit_button("Update Role"):
+                                    supabase.table("Role").update({"Roles": new_role}).eq("User Name", target_user).execute()
+                                    st.success(f"Updated {target_user} to {new_role}")
+                                    time.sleep(1)
+                                    st.rerun()
+                        
+                        with col_up2:
+                            st.markdown("##### 📍 Update Staff Location")
+                            with st.form("loc_update_form"):
+                                target_user_loc = st.selectbox("Select User", users_df['User Name'].unique())
+                                new_loc = st.selectbox("Assign Location", ["Pv", "Canape-Vert", "Both"])
+                                if st.form_submit_button("Update Location"):
+                                    supabase.table("Role").update({"Location": new_loc}).eq("User Name", target_user_loc).execute()
+                                    st.success(f"Relocated {target_user_loc} to {new_loc}")
+                                    time.sleep(1)
+                                    st.rerun()
+                    else:
+                        st.warning("The Role table is currently empty.")
+                except Exception as e:
+                    st.error(f"Could not load user table: {e}")
 
             # --- SUB-TAB 2: GLOBAL ACTIVITY LOG ---
             with admin_subtab[1]:
                 st.subheader("Recent System-Wide Actions")
-                log_choice = st.radio("View Logs From:", ["Arrivals", "Inventory Audits", "Depot Movements"], horizontal=True)
+                log_choice = st.radio("View Logs From:", ["Arrivals", "Inventory Audits", "Depot Movements", "Mannequin Display"], horizontal=True)
                 
+                # Mapping the selection to your exact Supabase table names
                 table_map = {
                     "Arrivals": "Arrival",
                     "Inventory Audits": "Inventory",
-                    "Depot Movements": "Depot"
+                    "Depot Movements": "Depot",
+                    "Mannequin Display": "Mannequin"
                 }
                 
                 try:
-                    logs = supabase.table(table_map[log_choice]).select("*").order("Date", desc=True).limit(20).execute()
+                    # Fetch the last 50 actions from the selected table
+                    logs = supabase.table(table_map[log_choice]).select("*").execute()
                     if logs.data:
-                        st.dataframe(pd.DataFrame(logs.data), use_container_width=True, hide_index=True)
+                        logs_df = pd.DataFrame(logs.data)
+                        
+                        # Apply a sort if a date column exists
+                        date_cols = ['Date', 'Last_Updated', 'created_at']
+                        found_date = next((c for c in date_cols if c in logs_df.columns), None)
+                        if found_date:
+                            logs_df = logs_df.sort_values(by=found_date, ascending=False)
+                        
+                        st.dataframe(logs_df, use_container_width=True, hide_index=True)
                     else:
-                        st.info("No logs found for this section.")
+                        st.info(f"No records found in the {log_choice} table.")
                 except Exception as e:
                     st.error(f"Error fetching logs: {e}")
 
             # --- SUB-TAB 3: DATABASE MAINTENANCE ---
             with admin_subtab[2]:
                 st.subheader("Data Management")
-                st.warning("⚠️ These actions are permanent.")
+                st.warning("⚠️ These tools allow you to export or manage bulk data.")
                 
-                col_clear1, col_clear2 = st.columns(2)
+                col_maint1, col_maint2 = st.columns(2)
                 
-                if col_clear1.button("🗑️ Clear All Arrival Logs"):
-                    # This would usually require a confirmation step in a real app
-                    st.error("Please contact support to perform bulk deletions.")
-                
-                if col_clear2.button("📦 Export Master Inventory to CSV"):
+                with col_maint1:
+                    st.write("### Export Data")
                     csv = master_inventory.to_csv(index=False).encode('utf-8')
-                    st.download_button("Download Master CSV", data=csv, file_name="master_inventory_export.csv", mime='text/csv')
+                    st.download_button(
+                        label="📥 Download Master Inventory (CSV)",
+                        data=csv,
+                        file_name=f"Master_Inventory_{date.today()}.csv",
+                        mime='text/csv',
+                    )
+                
+                with col_maint2:
+                    st.write("### System Status")
+                    total_items = len(master_inventory)
+                    st.metric("Total Items in System", total_items)
+                    st.info("To clear or reset database tables, please use the Supabase SQL Editor for safety.")
 
     # --- 9. PASSWORD TAB ---
     with tabs[8]:
@@ -730,11 +775,3 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
-
-
-
-
-
-
-
-
