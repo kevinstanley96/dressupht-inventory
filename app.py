@@ -416,8 +416,94 @@ if authentication_status:
 
     # --- 5. DEPOT (BIG DEPOT) TAB ---
     with tabs[4]:
-        st.header("📦 Depot")
-        st.write("Placeholder for back-stock management.")
+        st.header("📦 Depot Management (Backstock)")
+
+        # 1. FETCH DEPOT DATA
+        try:
+            d_query = supabase.table("Depot").select("*").order("Date", desc=True).execute()
+            d_df = pd.DataFrame(d_query.data) if d_query.data else pd.DataFrame()
+        except Exception:
+            d_df = pd.DataFrame()
+
+        # 2. DISPLAY LOG (AT THE TOP)
+        st.subheader("Recent Depot Activity")
+        if not d_df.empty:
+            # We display the last 10 activities with a delete option
+            h1, h2, h3, h4, h5, h6 = st.columns([1, 2, 1, 1, 1, 1])
+            h1.write("**Date**")
+            h2.write("**Wig Name**")
+            h3.write("**Type**")
+            h4.write("**Qty**")
+            h5.write("**User**")
+            h6.write("**Action**")
+            st.divider()
+
+            for index, row in d_df.head(10).iterrows():
+                r1, r2, r3, r4, r5, r6 = st.columns([1, 2, 1, 1, 1, 1])
+                r1.write(row['Date'])
+                r2.write(row['Wig Name'])
+                # Color code Type
+                type_color = "🟢" if row['Type'] == "Addition" else "🔴"
+                r3.write(f"{type_color} {row['Type']}")
+                r4.write(str(row['Quantity']))
+                r5.write(row['User'])
+                
+                if r6.button("🗑️", key=f"del_dep_{row['id']}"):
+                    supabase.table("Depot").delete().eq("id", row['id']).execute()
+                    st.success("Entry removed.")
+                    time.sleep(0.5)
+                    st.rerun()
+        else:
+            st.info("No activity recorded in the Depot yet.")
+
+        st.divider()
+
+        # 3. LOG IN OPTIONS (AT THE BOTTOM)
+        st.subheader("Log Depot Movement")
+        col_d1, col_d2 = st.columns([2, 1])
+
+        with col_d1:
+            d_search = st.text_input("🔍 Search Item for Depot", placeholder="Search by SKU or Name...", key="dep_search").lower()
+            
+            if d_search:
+                tokens = d_search.split()
+                match = master_inventory.copy()
+                for t in tokens:
+                    match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
+                
+                if not match.empty:
+                    d_item = match.iloc[0]
+                    st.success(f"Selected: **{d_item['Full Name']}**")
+                    
+                    # Calculate Current Net Stock in Depot for this SKU
+                    if not d_df.empty:
+                        sku_df = d_df[d_df['SKU'] == d_item['SKU']]
+                        adds = sku_df[sku_df['Type'] == "Addition"]['Quantity'].sum()
+                        subs = sku_df[sku_df['Type'] == "Withdrawal"]['Quantity'].sum()
+                        net_depot = adds - subs
+                        st.metric("Current Net in Depot", f"{int(net_depot)} units")
+
+                    with st.form("depot_form", clear_on_submit=True):
+                        d_type = st.radio("Movement Type", ["Addition", "Withdrawal"], horizontal=True)
+                        d_qty = st.number_input("Quantity", min_value=1, step=1)
+                        d_date = st.date_input("Date", value=date.today())
+                        
+                        if st.form_submit_button("Confirm Depot Entry"):
+                            dep_entry = {
+                                "Date": str(d_date),
+                                "SKU": str(d_item['SKU']),
+                                "Wig Name": str(d_item['Full Name']),
+                                "Type": d_type,
+                                "Quantity": int(d_qty),
+                                "User": str(username)
+                            }
+                            
+                            supabase.table("Depot").insert(dep_entry).execute()
+                            st.success(f"Recorded {d_type} for {d_item['Full Name']}")
+                            time.sleep(1)
+                            st.rerun()
+                else:
+                    st.error("Item not found.")
 
     # --- 6. COMPARE TAB ---
     with tabs[5]:
@@ -444,5 +530,6 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
