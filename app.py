@@ -308,20 +308,35 @@ if authentication_status:
             st.write(f"### 📝 {audit_cat} Entry Grid")
             st.caption("The system has pre-filled Exposed and Depot counts. Enter your manual shelf counts below:")
 
-            # 4. THE DATA EDITOR (The "Ready Table")
+            # --- 4. DATA CLEANING (Prevents TypeErrors) ---
+            # Fill any missing values with 0 and ensure they are integers
+            cat_items['Stock'] = cat_items['Stock'].fillna(0).astype(int)
+            cat_items['Exposed'] = cat_items['Exposed'].fillna(0).astype(int)
+            cat_items['Depot'] = cat_items['Depot'].fillna(0).astype(int)
+            cat_items['Shelf_Count'] = 0
+            cat_items['Returns'] = 0
+
+            # --- 5. THE DATA EDITOR ---
+            st.write(f"### 📝 {audit_cat} Entry Grid")
+            
             edited_df = st.data_editor(
                 cat_items[['SKU', 'Full Name', 'Stock', 'Exposed', 'Depot', 'Shelf_Count', 'Returns']],
                 column_config={
-                    "Stock": "System Stock",
-                    "Exposed": "📍 Mannequin",
-                    "Depot": "📦 Depot",
-                    "Shelf_Count": st.column_config.NumberColumn("🏢 Manual Shelf", help="Enter counted shelf stock", min_value=0, step=1, icon="✏️"),
+                    "Stock": st.column_config.NumberColumn("System Stock"),
+                    "Exposed": st.column_config.NumberColumn("📍 Mannequin"),
+                    "Depot": st.column_config.NumberColumn("📦 Depot"),
+                    "Shelf_Count": st.column_config.NumberColumn(
+                        "🏢 Manual Shelf", 
+                        help="Enter counted shelf stock", 
+                        min_value=0, 
+                        step=1
+                    ),
                     "Returns": st.column_config.NumberColumn("🔄 Returns", min_value=0, step=1)
                 },
-                disabled=["SKU", "Full Name", "Stock", "Exposed", "Depot"], # Prevent editing system data
+                disabled=["SKU", "Full Name", "Stock", "Exposed", "Depot"],
                 hide_index=True,
                 use_container_width=True,
-                key=f"editor_{audit_cat}" # Key changes per category to refresh data
+                key=f"editor_{audit_cat}"
             )
 
             # 5. Bulk Save Button
@@ -795,5 +810,6 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
