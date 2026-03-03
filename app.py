@@ -507,8 +507,71 @@ if authentication_status:
 
     # --- 6. COMPARE TAB ---
     with tabs[5]:
-        st.header("🔄 Compare")
-        st.write("Placeholder for location comparison (CV vs PV).")
+        st.header("🔄 Stock Comparison & Thresholds")
+
+        if not master_inventory.empty:
+            # --- PART A: SIDE-BY-SIDE COMPARISON ---
+            st.subheader("Location Comparison (CV vs PV)")
+            
+            # Split the master inventory into two dataframes
+            df_cv = master_inventory[master_inventory['Location'] == "Canape-Vert"][['SKU', 'Full Name', 'Stock', 'Category']]
+            df_pv = master_inventory[master_inventory['Location'] == "Pv"][['SKU', 'Full Name', 'Stock']]
+            
+            # Merge on SKU to show them side-by-side. 
+            # How='outer' ensures that if a SKU is in CV but not PV (or vice versa), it still shows.
+            comparison_df = pd.merge(
+                df_cv, 
+                df_pv, 
+                on="SKU", 
+                how="outer", 
+                suffixes=('_CV', '_PV')
+            )
+            
+            # Clean up the merged data
+            comparison_df['Full Name_CV'] = comparison_df['Full Name_CV'].fillna(comparison_df['Full Name_PV'])
+            comparison_df['Stock_CV'] = comparison_df['Stock_CV'].fillna(0).astype(int)
+            comparison_df['Stock_PV'] = comparison_df['Stock_PV'].fillna(0).astype(int)
+            
+            # Formatting for display
+            display_comp = comparison_df[['SKU', 'Full Name_CV', 'Stock_CV', 'Stock_PV']].rename(columns={
+                'Full Name_CV': 'Wig Name',
+                'Stock_CV': 'Qty (Canape-Vert)',
+                'Stock_PV': 'Qty (PV)'
+            })
+
+            # Search within comparison
+            comp_search = st.text_input("🔍 Search Comparison", placeholder="Filter by Name or SKU...").lower()
+            if comp_search:
+                display_comp = display_comp[
+                    display_comp['Wig Name'].str.lower().str.contains(comp_search) | 
+                    display_comp['SKU'].str.lower().str.contains(comp_search)
+                ]
+
+            st.dataframe(display_comp, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # --- PART B: OVER 50 STOCK CHECK ---
+            st.subheader("🔥 High Stock Alert (Over 50 Units)")
+            col_high1, col_high2 = st.columns(2)
+
+            with col_high1:
+                st.markdown("##### 📍 Canape-Vert (> 50)")
+                high_cv = df_cv[df_cv['Stock'] > 50].sort_values(by="Stock", ascending=False)
+                if not high_cv.empty:
+                    st.dataframe(high_cv[['SKU', 'Full Name', 'Stock']], use_container_width=True, hide_index=True)
+                else:
+                    st.write("No items over 50 in Canape-Vert.")
+
+            with col_high2:
+                st.markdown("##### 📍 PV (> 50)")
+                high_pv = df_pv[df_pv['Stock'] > 50].sort_values(by="Stock", ascending=False)
+                if not high_pv.empty:
+                    st.dataframe(high_pv[['SKU', 'Full Name', 'Stock']], use_container_width=True, hide_index=True)
+                else:
+                    st.write("No items over 50 in PV.")
+        else:
+            st.info("Please upload inventory files in the sidebar to perform comparison.")
 
     # --- 7. SALES TAB ---
     with tabs[6]:
@@ -530,6 +593,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
