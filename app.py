@@ -312,7 +312,7 @@ if authentication_status:
                             "Location": "Pv"
                         }
                         
-                        supabase.table("Inventory_Audit").insert(audit_entry).execute()
+                        supabase.table("Inventory").insert(audit_entry).execute()
                         st.success(f"Audit Saved! Discrepancy: {discrepancy}")
                         time.sleep(1)
                         st.rerun()
@@ -370,6 +370,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
