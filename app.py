@@ -6,7 +6,7 @@ import time
 import plotly.express as px
 
 # --- 1. PAGE CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v6.0", layout="wide")
+st.set_page_config(page_title="Dressupht Stock ERP v6.0", layout="wide")
 
 # --- 2. SUPABASE CONNECTION ---
 @st.cache_resource
@@ -29,5 +29,6 @@ if 'audit_verify' not in st.session_state:
         "auto_depot": 0
     }
 
-st.title("👗 Dressupht ERP NextGen")
+st.title("DRESSUP HAITI STOCK SYSTEM")
 st.write("System initialized and connected.")
+
