@@ -17,6 +17,19 @@ def init_connection():
 supabase = init_connection()
 
 # --- 3. HELPER FUNCTIONS ---
+@st.cache_data(ttl=600)
+def fetch_master_inventory():
+    try:
+        query = supabase.table("Master_Inventory").select("*").execute()
+        df = pd.DataFrame(query.data)
+        if not df.empty:
+            # Default sort by Name as per your preference
+            df = df.sort_values(by="Full Name")
+        return df
+    except Exception as e:
+        st.error(f"Error: {e}")
+        return pd.DataFrame()
+
 def get_user_role(username):
     try:
         res = supabase.table("Role").select("Roles, Location").eq("User Name", username.lower()).execute()
@@ -71,6 +84,9 @@ name, authentication_status, username = authenticator.login(location='main')
 # --- 5. APP LOGIC ---
 if authentication_status:
     role, loc = get_user_role(username)
+    
+    # Fetch data only after login (Uses Cache)
+    master_inventory = fetch_master_inventory()
 
     # --- SIDEBAR ---
     with st.sidebar:
@@ -88,11 +104,19 @@ if authentication_status:
                 if f_cv and f_pv:
                     with st.spinner("Processing..."):
                         final_df = clean_and_combine(f_cv, f_pv)
+                        
+                        # Database Update
                         supabase.table("Master_Inventory").delete().neq("SKU", "VOID").execute()
                         supabase.table("Master_Inventory").insert(final_df.to_dict('records')).execute()
+                        
+                        # CLEAR CACHE: So 'master_inventory' updates on next rerun
+                        st.cache_data.clear()
+                        
                         st.success("Database Updated!")
                         time.sleep(1)
                         st.rerun()
+                else:
+                    st.warning("Please upload both files first.")
         
         authenticator.logout('Logout', 'sidebar')
 
@@ -775,3 +799,4 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
