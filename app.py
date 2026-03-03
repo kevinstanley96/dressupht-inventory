@@ -227,11 +227,10 @@ if authentication_status:
     with tabs[2]:
         st.header("📋 Physical Inventory Audit (PV Only)")
 
-        # Initialize Session State for Audit
         if 'audit_verify' not in st.session_state:
             st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
 
-        # 1. Fetch live data for Mannequin and Depot to pre-fill the form
+        # 1. Fetch live data for calculations
         try:
             exp_data = supabase.table("Mannequin").select("*").execute()
             dep_data = supabase.table("Depot").select("*").execute()
@@ -244,37 +243,27 @@ if authentication_status:
 
         with ca:
             st.subheader("Audit Entry")
-            # A. Counter Selection
             counter = st.selectbox("Person Counting", [u.upper() for u in usernames_list])
-            
-            # B. SKU / Name Search (Tokenized)
             search_input = st.text_input("🔍 Search SKU or Name", key="audit_search").lower()
             
             if search_input:
-                # Filter Master Inventory for PV only
                 pv_master = master_inventory[master_inventory['Location'] == "Pv"]
-                
-                # Tokenized Search Logic
                 tokens = search_input.split()
                 match = pv_master.copy()
                 for t in tokens:
                     match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
                 
                 if not match.empty:
-                    selected_item = match.iloc[0] # Grab the first match
+                    selected_item = match.iloc[0]
                     sku_to_audit = selected_item['SKU']
                     
-                    # C. Auto-Calculate Live Totals from other tables
-                    # Calculate Exposed (Mannequin)
                     e_val = int(df_exp[df_exp['SKU'].str.lower() == sku_to_audit.lower()]['Quantity'].sum()) if not df_exp.empty else 0
-                    
-                    # Calculate Depot (Additions - Subtractions)
                     d_val = 0
                     if not df_dep.empty:
                         dm = df_dep[df_dep['SKU'].str.lower() == sku_to_audit.lower()]
+                        # Note: Summing Depot logic (Additions - Subtractions)
                         d_val = int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - dm[dm['Type'] == "Subtraction"]['Quantity'].sum())
 
-                    # Update Session State
                     st.session_state.audit_verify = {
                         "name": selected_item['Full Name'],
                         "cat": selected_item['Category'],
@@ -286,10 +275,8 @@ if authentication_status:
                 else:
                     st.session_state.audit_verify["name"] = None
 
-            # D. The Audit Form
             if st.session_state.audit_verify["name"]:
                 st.info(f"**Item:** {st.session_state.audit_verify['name']}\n\n**System Stock:** {st.session_state.audit_verify['sys']}")
-                
                 with st.form("audit_form_pv", clear_on_submit=True):
                     f_shelf = st.number_input("Shelf (Manual Count)", min_value=0, step=1)
                     f_exp = st.number_input("Exposed (Mannequin)", value=st.session_state.audit_verify["auto_exp"])
@@ -297,43 +284,49 @@ if authentication_status:
                     f_ret = st.number_input("Returns", min_value=0, step=1)
                     
                     if st.form_submit_button("💾 Save Audit Record"):
-                        total_phys = f_shelf + f_exp + f_dep + f_ret
-                        discrepancy = total_phys - st.session_state.audit_verify["sys"]
+                        total_phys = int(f_shelf + f_exp + f_dep + f_ret)
+                        sys_stock = int(st.session_state.audit_verify["sys"])
+                        discrepancy = int(total_phys - sys_stock)
                         
                         audit_entry = {
                             "Date": str(date.today()),
-                            "SKU": st.session_state.audit_verify["sku"],
-                            "Name": st.session_state.audit_verify["name"],
-                            "Category": st.session_state.audit_verify["cat"],
-                            "Counter_Name": counter,
+                            "SKU": str(st.session_state.audit_verify["sku"]),
+                            "Name": str(st.session_state.audit_verify["name"]),
+                            "Category": str(st.session_state.audit_verify["cat"]),
+                            "Counter_Name": str(counter),
                             "Total_Physical": total_phys,
-                            "System_Stock": st.session_state.audit_verify["sys"],
+                            "System_Stock": sys_stock,
                             "Discrepancy": discrepancy,
                             "Location": "Pv"
                         }
                         
+                        # UPDATED TABLE NAME: Inventory
                         supabase.table("Inventory").insert(audit_entry).execute()
                         st.success(f"Audit Saved! Discrepancy: {discrepancy}")
+                        st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
                         time.sleep(1)
                         st.rerun()
 
         with cb:
-            st.subheader("Inventory Audit Log")
+            st.subheader("Audit History Log")
             try:
-                aud_log = supabase.table("Inventory_Audit").select("*").order("Date", desc=True).limit(15).execute()
-                if aud_log.data:
-                    df_log = pd.DataFrame(aud_log.data)
-                    # Color coding discrepancies
-                    def color_diff(val):
-                        color = 'red' if val < 0 else 'green' if val > 0 else 'white'
-                        return f'color: {color}'
+                # UPDATED TABLE NAME: Inventory
+                # We pull the last 50 audits sorted by date
+                aud_log_res = supabase.table("Inventory").select("*").order("Date", desc=True).limit(50).execute()
+                
+                if aud_log_res.data:
+                    df_log = pd.DataFrame(aud_log_res.data)
                     
-                    st.dataframe(df_log[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
-                                 use_container_width=True, hide_index=True)
+                    # Displaying the log with relevant columns
+                    st.dataframe(
+                        df_log[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
                 else:
-                    st.write("No audit records found.")
-            except Exception:
-                st.write("Ready to log audits.")
+                    st.info("No audit records found in the 'Inventory' table yet.")
+            except Exception as e:
+                st.error(f"Error fetching history: {e}")
 
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
     with tabs[3]:
@@ -370,6 +363,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
