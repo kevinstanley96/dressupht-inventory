@@ -335,12 +335,16 @@ if authentication_status:
         # 1. FETCH & DISPLAY HISTORY (AT THE TOP)
         st.subheader("Current Wigs on Display")
         try:
-            m_query = supabase.table("Mannequin").select("*").order("created_at", desc=True).execute()
+            m_query = supabase.table("Mannequin").select("*").execute()
             m_df = pd.DataFrame(m_query.data) if m_query.data else pd.DataFrame()
             
             if not m_df.empty:
-                # We create a column layout for each row to include a "Delete" button
-                # Header
+                # Sort by Last_Updated string so newest entries appear first
+                m_df = m_df.sort_values(by="Last_Updated", ascending=False)
+
+                st.write(f"**Total Items on Display:** {int(m_df['Quantity'].sum())}")
+
+                # Table Header
                 h1, h2, h3, h4, h5 = st.columns([1, 2, 1, 2, 1])
                 h1.write("**SKU**")
                 h2.write("**Name**")
@@ -349,17 +353,18 @@ if authentication_status:
                 h5.write("**Action**")
                 st.divider()
 
+                # Row display with Delete functionality based on SKU + Location
                 for index, row in m_df.iterrows():
                     r1, r2, r3, r4, r5 = st.columns([1, 2, 1, 2, 1])
                     r1.write(row['SKU'])
                     r2.write(row['Full Name'])
-                    r3.write(row['Quantity'])
+                    r3.write(str(row['Quantity']))
                     r4.write(row['Last_Updated'])
                     
-                    # DELETE BUTTON per row
-                    if r5.button("🗑️ Delete", key=f"del_man_{row['SKU']}_{index}"):
-                        supabase.table("Mannequin").delete().eq("id", row['id']).execute()
-                        st.success(f"Removed {row['SKU']} from display.")
+                    # DELETE BUTTON: Uses SKU and Location to find the row
+                    if r5.button("🗑️ Delete", key=f"del_man_{row['SKU']}_{row['Location']}"):
+                        supabase.table("Mannequin").delete().eq("SKU", row['SKU']).eq("Location", row['Location']).execute()
+                        st.success(f"Removed {row['Full Name']} from display.")
                         time.sleep(0.5)
                         st.rerun()
             else:
@@ -371,45 +376,43 @@ if authentication_status:
 
         # 2. LOG IN OPTIONS (AT THE BOTTOM)
         st.subheader("Add/Update Display")
-        col_m1, col_m2 = st.columns([2, 1])
-
-        with col_m1:
-            # Tokenized Search (Name or SKU)
-            m_search = st.text_input("🔍 Search Item to Display", placeholder="Type Name or SKU...").lower()
+        
+        # Tokenized Search (Name or SKU)
+        m_search = st.text_input("🔍 Search Item to Display", placeholder="Type Name or SKU...").lower()
+        
+        if m_search:
+            tokens = m_search.split()
+            match = master_inventory.copy()
+            for t in tokens:
+                match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
             
-            if m_search:
-                tokens = m_search.split()
-                match = master_inventory.copy()
-                for t in tokens:
-                    match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
+            if not match.empty:
+                m_item = match.iloc[0]
+                st.success(f"Selected: **{m_item['Full Name']}** ({m_item['SKU']})")
                 
-                if not match.empty:
-                    m_item = match.iloc[0]
-                    st.success(f"Selected: **{m_item['Full Name']}** ({m_item['SKU']})")
+                with st.form("man_form", clear_on_submit=True):
+                    # Constraints: Max 2, Current Date only
+                    m_qty = st.number_input("Quantity", min_value=1, max_value=2, step=1)
+                    m_loc = st.selectbox("Location", ["Pv", "Canape-Vert"], index=0 if m_item['Location'] == "Pv" else 1)
                     
-                    with st.form("man_form", clear_on_submit=True):
-                        # Constraints: Max 2, Current Date only
-                        m_qty = st.number_input("Quantity", min_value=1, max_value=2, step=1)
-                        m_loc = st.selectbox("Location", ["Pv", "Canape-Vert"], index=0 if m_item['Location'] == "Pv" else 1)
+                    if st.form_submit_button("🚀 Set on Mannequin"):
+                        man_entry = {
+                            "SKU": str(m_item['SKU']),
+                            "Full Name": str(m_item['Full Name']),
+                            "Quantity": int(m_qty),
+                            "Location": str(m_loc),
+                            "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        }
                         
-                        if st.form_submit_button("🚀 Set on Mannequin"):
-                            man_entry = {
-                                "SKU": m_item['SKU'],
-                                "Full Name": m_item['Full Name'],
-                                "Quantity": m_qty,
-                                "Location": m_loc,
-                                "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")
-                            }
-                            
-                            # Upsert logic: Delete existing for that SKU/Loc then insert fresh
-                            supabase.table("Mannequin").delete().eq("SKU", m_item['SKU']).eq("Location", m_loc).execute()
-                            supabase.table("Mannequin").insert(man_entry).execute()
-                            
-                            st.success("Display Updated!")
-                            time.sleep(1)
-                            st.rerun()
-                else:
-                    st.error("No item found.")
+                        # Upsert logic: Delete existing for that SKU+Location then insert fresh
+                        supabase.table("Mannequin").delete().eq("SKU", m_item['SKU']).eq("Location", m_loc).execute()
+                        supabase.table("Mannequin").insert(man_entry).execute()
+                        
+                        st.success(f"Updated display for {m_item['Full Name']}!")
+                        time.sleep(1)
+                        st.rerun()
+            else:
+                st.error("No item found in Master Inventory.")
 
     # --- 5. DEPOT (BIG DEPOT) TAB ---
     with tabs[4]:
@@ -441,4 +444,5 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
