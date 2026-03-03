@@ -21,7 +21,7 @@ def get_user_role(username):
     try:
         res = supabase.table("Role").select("Roles, Location").eq("User Name", username.lower()).execute()
         if res.data:
-            return res.data[0]['Roles'], res.data[0]['Assigned Location']
+            return res.data[0]['Roles'], res.data[0]['Location']
         return "Staff", "Unknown"
     except Exception:
         return "Staff", "Unknown"
@@ -94,4 +94,5 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
