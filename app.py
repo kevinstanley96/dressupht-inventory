@@ -658,8 +658,67 @@ if authentication_status:
 
     # --- 8. ADMIN TAB ---
     with tabs[7]:
-        st.header("⚙️ Admin Panel")
-        st.write("Placeholder for user roles and system settings.")
+        st.header("⚙️ Admin Control Tower")
+        
+        # Restriction: Strictly Admin Only
+        if role != "Admin":
+            st.error("🚫 Access Denied. This section is restricted to System Administrators.")
+        else:
+            admin_subtab = st.tabs(["👤 User Management", "📜 Global Activity Log", "🧹 Database Maintenance"])
+
+            # --- SUB-TAB 1: USER MANAGEMENT ---
+            with admin_subtab[0]:
+                st.subheader("Manage Team Roles")
+                try:
+                    users_query = supabase.table("Role").select("*").execute()
+                    users_df = pd.DataFrame(users_query.data)
+                    
+                    st.dataframe(users_df[['username', 'role']], use_container_width=True, hide_index=True)
+                    
+                    with st.expander("➕ Update User Role"):
+                        target_user = st.selectbox("Select User", users_df['username'].unique())
+                        new_role = st.selectbox("Assign New Role", ["Admin", "Manager", "Staff"])
+                        if st.button("Update Permissions"):
+                            supabase.table("Role").update({"role": new_role}).eq("username", target_user).execute()
+                            st.success(f"Permissions updated for {target_user}")
+                            st.rerun()
+                except:
+                    st.error("Could not load user table.")
+
+            # --- SUB-TAB 2: GLOBAL ACTIVITY LOG ---
+            with admin_subtab[1]:
+                st.subheader("Recent System-Wide Actions")
+                log_choice = st.radio("View Logs From:", ["Arrivals", "Inventory Audits", "Depot Movements"], horizontal=True)
+                
+                table_map = {
+                    "Arrivals": "Arrival",
+                    "Inventory Audits": "Inventory",
+                    "Depot Movements": "Depot"
+                }
+                
+                try:
+                    logs = supabase.table(table_map[log_choice]).select("*").order("Date", desc=True).limit(20).execute()
+                    if logs.data:
+                        st.dataframe(pd.DataFrame(logs.data), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No logs found for this section.")
+                except Exception as e:
+                    st.error(f"Error fetching logs: {e}")
+
+            # --- SUB-TAB 3: DATABASE MAINTENANCE ---
+            with admin_subtab[2]:
+                st.subheader("Data Management")
+                st.warning("⚠️ These actions are permanent.")
+                
+                col_clear1, col_clear2 = st.columns(2)
+                
+                if col_clear1.button("🗑️ Clear All Arrival Logs"):
+                    # This would usually require a confirmation step in a real app
+                    st.error("Please contact support to perform bulk deletions.")
+                
+                if col_clear2.button("📦 Export Master Inventory to CSV"):
+                    csv = master_inventory.to_csv(index=False).encode('utf-8')
+                    st.download_button("Download Master CSV", data=csv, file_name="master_inventory_export.csv", mime='text/csv')
 
     # --- 9. PASSWORD TAB ---
     with tabs[8]:
@@ -671,6 +730,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
