@@ -261,110 +261,106 @@ if authentication_status:
                 except Exception:
                     st.error("Could not load arrival logs.")
 
-    # --- 3. INVENTORY (AUDIT) TAB ---
+   # --- 3. INVENTORY (AUDIT) TAB ---
     with tabs[2]:
         st.header("📋 Physical Inventory Audit (PV Only)")
 
-        if 'audit_verify' not in st.session_state:
-            st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
+        # 1. Setup Filters for the Grid
+        col_select1, col_select2 = st.columns(2)
+        with col_select1:
+            # We use Category to generate the "Ready Table"
+            audit_cat = st.selectbox("1. Select Category to Audit", 
+                                   sorted(master_inventory['Category'].unique().tolist()))
+        with col_select2:
+            counter = st.selectbox("2. Person Counting", [u.upper() for u in usernames_list])
 
-        # 1. Fetch live data for calculations
+        # 2. Fetch live data for calculations (Exposed & Depot)
         try:
-            exp_data = supabase.table("Mannequin").select("*").execute()
-            dep_data = supabase.table("Depot").select("*").execute()
-            df_exp = pd.DataFrame(exp_data.data) if exp_data.data else pd.DataFrame()
-            df_dep = pd.DataFrame(dep_data.data) if dep_data.data else pd.DataFrame()
+            exp_data = supabase.table("Mannequin").select("SKU, Quantity").execute()
+            dep_data = supabase.table("Depot").select("SKU, Quantity, Type").execute()
+            df_exp = pd.DataFrame(exp_data.data) if exp_data.data else pd.DataFrame(columns=['SKU', 'Quantity'])
+            df_dep = pd.DataFrame(dep_data.data) if dep_data.data else pd.DataFrame(columns=['SKU', 'Quantity', 'Type'])
         except Exception:
-            df_exp, df_dep = pd.DataFrame(), pd.DataFrame()
+            df_exp, df_dep = pd.DataFrame(columns=['SKU', 'Quantity']), pd.DataFrame(columns=['SKU', 'Quantity', 'Type'])
 
-        ca, cb = st.columns([1, 2])
+        # 3. Prepare the Category Grid
+        # Filter master for the selected category at PV
+        cat_items = master_inventory[(master_inventory['Category'] == audit_cat) & 
+                                    (master_inventory['Location'] == "Pv")].copy()
+        
+        if not cat_items.empty:
+            # Helper function for Depot Net (Additions - Subtractions)
+            def get_depot_net(sku):
+                if df_dep.empty: return 0
+                dm = df_dep[df_dep['SKU'].str.lower() == sku.lower()]
+                adds = dm[dm['Type'] == "Addition"]['Quantity'].sum()
+                subs = dm[dm['Type'] == "Subtraction"]['Quantity'].sum()
+                return int(adds - subs)
 
-        with ca:
-            st.subheader("Audit Entry")
-            counter = st.selectbox("Person Counting", [u.upper() for u in usernames_list])
-            search_input = st.text_input("🔍 Search SKU or Name", key="audit_search").lower()
+            # Pre-fill the "Calculated" columns
+            cat_items['Exposed'] = cat_items['SKU'].apply(lambda x: int(df_exp[df_exp['SKU'].str.lower() == x.lower()]['Quantity'].sum()) if not df_exp.empty else 0)
+            cat_items['Depot'] = cat_items['SKU'].apply(get_depot_net)
             
-            if search_input:
-                pv_master = master_inventory[master_inventory['Location'] == "Pv"]
-                tokens = search_input.split()
-                match = pv_master.copy()
-                for t in tokens:
-                    match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
+            # Add the empty columns for manual entry
+            cat_items['Shelf_Count'] = 0
+            cat_items['Returns'] = 0
+
+            st.write(f"### 📝 {audit_cat} Entry Grid")
+            st.caption("The system has pre-filled Exposed and Depot counts. Enter your manual shelf counts below:")
+
+            # 4. THE DATA EDITOR (The "Ready Table")
+            edited_df = st.data_editor(
+                cat_items[['SKU', 'Full Name', 'Stock', 'Exposed', 'Depot', 'Shelf_Count', 'Returns']],
+                column_config={
+                    "Stock": "System Stock",
+                    "Exposed": "📍 Mannequin",
+                    "Depot": "📦 Depot",
+                    "Shelf_Count": st.column_config.NumberColumn("🏢 Manual Shelf", help="Enter counted shelf stock", min_value=0, step=1, icon="✏️"),
+                    "Returns": st.column_config.NumberColumn("🔄 Returns", min_value=0, step=1)
+                },
+                disabled=["SKU", "Full Name", "Stock", "Exposed", "Depot"], # Prevent editing system data
+                hide_index=True,
+                use_container_width=True,
+                key=f"editor_{audit_cat}" # Key changes per category to refresh data
+            )
+
+            # 5. Bulk Save Button
+            if st.button(f"💾 Submit All {len(edited_df)} Records", use_container_width=True):
+                audit_entries = []
+                for _, row in edited_df.iterrows():
+                    total_phys = int(row['Shelf_Count'] + row['Exposed'] + row['Depot'] + row['Returns'])
+                    sys_stock = int(row['Stock'])
+                    
+                    audit_entries.append({
+                        "Date": str(date.today()),
+                        "SKU": str(row['SKU']),
+                        "Name": str(row['Full Name']),
+                        "Category": str(audit_cat),
+                        "Counter_Name": str(counter),
+                        "Total_Physical": total_phys,
+                        "System_Stock": sys_stock,
+                        "Discrepancy": int(total_phys - sys_stock),
+                        "Location": "Pv"
+                    })
                 
-                if not match.empty:
-                    selected_item = match.iloc[0]
-                    sku_to_audit = selected_item['SKU']
-                    
-                    e_val = int(df_exp[df_exp['SKU'].str.lower() == sku_to_audit.lower()]['Quantity'].sum()) if not df_exp.empty else 0
-                    d_val = 0
-                    if not df_dep.empty:
-                        dm = df_dep[df_dep['SKU'].str.lower() == sku_to_audit.lower()]
-                        # Note: Summing Depot logic (Additions - Subtractions)
-                        d_val = int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - dm[dm['Type'] == "Subtraction"]['Quantity'].sum())
+                try:
+                    supabase.table("Inventory").insert(audit_entries).execute()
+                    st.success("✅ Full category audit saved successfully!")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving audit: {e}")
+        else:
+            st.warning("No items found for this category in PV.")
 
-                    st.session_state.audit_verify = {
-                        "name": selected_item['Full Name'],
-                        "cat": selected_item['Category'],
-                        "sys": int(selected_item['Stock']),
-                        "sku": sku_to_audit,
-                        "auto_exp": e_val,
-                        "auto_depot": d_val
-                    }
-                else:
-                    st.session_state.audit_verify["name"] = None
-
-            if st.session_state.audit_verify["name"]:
-                st.info(f"**Item:** {st.session_state.audit_verify['name']}\n\n**System Stock:** {st.session_state.audit_verify['sys']}")
-                with st.form("audit_form_pv", clear_on_submit=True):
-                    f_shelf = st.number_input("Shelf (Manual Count)", min_value=0, step=1)
-                    f_exp = st.number_input("Exposed (Mannequin)", value=st.session_state.audit_verify["auto_exp"])
-                    f_dep = st.number_input("Depot (Backstock)", value=st.session_state.audit_verify["auto_depot"])
-                    f_ret = st.number_input("Returns", min_value=0, step=1)
-                    
-                    if st.form_submit_button("💾 Save Audit Record"):
-                        total_phys = int(f_shelf + f_exp + f_dep + f_ret)
-                        sys_stock = int(st.session_state.audit_verify["sys"])
-                        discrepancy = int(total_phys - sys_stock)
-                        
-                        audit_entry = {
-                            "Date": str(date.today()),
-                            "SKU": str(st.session_state.audit_verify["sku"]),
-                            "Name": str(st.session_state.audit_verify["name"]),
-                            "Category": str(st.session_state.audit_verify["cat"]),
-                            "Counter_Name": str(counter),
-                            "Total_Physical": total_phys,
-                            "System_Stock": sys_stock,
-                            "Discrepancy": discrepancy,
-                            "Location": "Pv"
-                        }
-                        
-                        # UPDATED TABLE NAME: Inventory
-                        supabase.table("Inventory").insert(audit_entry).execute()
-                        st.success(f"Audit Saved! Discrepancy: {discrepancy}")
-                        st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
-                        time.sleep(1)
-                        st.rerun()
-
-        with cb:
-            st.subheader("Audit History Log")
-            try:
-                # UPDATED TABLE NAME: Inventory
-                # We pull the last 50 audits sorted by date
-                aud_log_res = supabase.table("Inventory").select("*").order("Date", desc=True).limit(50).execute()
-                
-                if aud_log_res.data:
-                    df_log = pd.DataFrame(aud_log_res.data)
-                    
-                    # Displaying the log with relevant columns
-                    st.dataframe(
-                        df_log[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
-                else:
-                    st.info("No audit records found in the 'Inventory' table yet.")
-            except Exception as e:
-                st.error(f"Error fetching history: {e}")
+        # 6. Audit History Log (Bottom)
+        st.divider()
+        st.subheader("Recent Audit Activity")
+        # Sort by the new ID column we created to see the absolute latest entries
+        log_res = supabase.table("Inventory").select("*").order("id", desc=True).limit(20).execute()
+        if log_res.data:
+            st.dataframe(pd.DataFrame(log_res.data)[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
+                         use_container_width=True, hide_index=True)
 
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
     with tabs[3]:
@@ -799,4 +795,5 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
