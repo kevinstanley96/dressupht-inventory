@@ -587,10 +587,63 @@ if authentication_status:
         else:
             st.info("Please upload inventory files in the sidebar to perform comparison.")
 
-    # --- 7. SALES TAB ---
+    # --- 7. SALES (FAST/SLOW MOVERS) ---
     with tabs[6]:
-        st.header("💰 Sales & Movement")
-        st.write("Placeholder for Sales data and Fast/Slow movers.")
+        st.header("💰 Sales Analysis (Fast vs Slow Movers)")
+        st.info("Compare an old Square Export with current data using the 'Token' ID.")
+
+        # 1. Upload Old Export
+        old_file = st.file_uploader("Upload Old Square Export (Excel)", type=['xlsx'], key="sales_old_file")
+
+        if old_file and not master_inventory.empty:
+            try:
+                # Load and Clean Old Data
+                df_old = pd.read_excel(old_file, skiprows=1)
+                df_old.columns = [str(c).strip() for c in df_old.columns]
+                
+                # We need Token and Quantity from the old file
+                # Square usually calls it 'Token' or 'Reference ID'
+                token_col = 'Token' if 'Token' in df_old.columns else None
+                old_qty_col = "Current Quantity Dressupht Pv" 
+
+                if not token_col:
+                    st.error("Could not find 'Token' column in the uploaded file.")
+                else:
+                    # Process current Master Inventory (PV Only)
+                    # Note: You'll need to ensure your Sidebar Upload logic also extracts 'Token' 
+                    # from the new files. For now, we assume it's in the Master_Inventory table.
+                    df_current_pv = master_inventory[master_inventory['Location'] == "Pv"].copy()
+                    
+                    # 2. Merge on Token
+                    sales_comp = pd.merge(
+                        df_old[[token_col, old_qty_col]], 
+                        df_current_pv, 
+                        on=token_col, 
+                        how='inner',
+                        suffixes=('_old', '_current')
+                    )
+
+                    # 3. Calculate Movement
+                    # Sales = Old Stock - Current Stock (assuming no new arrivals in between)
+                    sales_comp['Movement'] = pd.to_numeric(sales_comp[old_qty_col], errors='coerce').fillna(0) - sales_comp['Stock']
+                    
+                    # 4. Display Results
+                    col_s1, col_s2 = st.columns(2)
+                    
+                    with col_s1:
+                        st.subheader("🚀 Fast Movers")
+                        fast = sales_comp[sales_comp['Movement'] > 0].sort_values(by='Movement', ascending=False)
+                        st.dataframe(fast[['Full Name', 'SKU', 'Movement']], use_container_width=True, hide_index=True)
+
+                    with col_s2:
+                        st.subheader("🐢 Slow Movers")
+                        slow = sales_comp[sales_comp['Movement'] <= 0].sort_values(by='Stock', ascending=False)
+                        st.dataframe(slow[['Full Name', 'SKU', 'Stock']], use_container_width=True, hide_index=True)
+            
+            except Exception as e:
+                st.error(f"Error processing sales data: {e}")
+        else:
+            st.warning("Please upload the old Square export and ensure PV data is synced in the sidebar.")
 
     # --- 8. ADMIN TAB ---
     with tabs[7]:
@@ -607,6 +660,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
