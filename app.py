@@ -86,13 +86,77 @@ if authentication_status:
     tab_list = ["Library", "Audit", "Big Depot"] # We'll add more as we go
     tabs = st.tabs(tab_list)
 
-    with tabs[0]: # Library Tab
-        st.header("📚 Inventory Library")
-        st.write("This is where we will add the search and sort features next.")
+    # --- TAB: LIBRARY ---
+    with tabs[0]:
+        # 1. Fetch Master Inventory
+        try:
+            query = supabase.table("Master_Inventory").select("*").execute()
+            master_inventory = pd.DataFrame(query.data)
+        except Exception:
+            master_inventory = pd.DataFrame()
+
+        if not master_inventory.empty:
+            # 2. Filtering UI (The "Drill")
+            c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+            
+            # A. Tokenized Search Bar
+            search_query = c1.text_input("🔍 Search", placeholder="e.g. 'body wave pv'").lower()
+            
+            # B. Location Filter
+            loc_list = ["All Locations"] + sorted(master_inventory['Location'].unique().tolist())
+            sel_loc = c2.selectbox("Filter Location", loc_list)
+            
+            # C. Category Filter
+            cat_list = ["All Categories"] + sorted(master_inventory['Category'].unique().tolist())
+            sel_cat = c3.selectbox("Filter Category", cat_list)
+            
+            # D. Sorting (Default: Name)
+            sort_choice = c4.selectbox("Sort By", ["Name", "Category", "Location", "Stock (High-Low)"])
+
+            # 3. Apply Logic
+            disp_df = master_inventory.copy()
+
+            # Apply Location Filter
+            if sel_loc != "All Locations":
+                disp_df = disp_df[disp_df['Location'] == sel_loc]
+            
+            # Apply Category Filter
+            if sel_cat != "All Categories":
+                disp_df = disp_df[disp_df['Category'] == sel_cat]
+
+            # Apply Tokenized Search (Finds items even if words are in different order)
+            if search_query:
+                tokens = search_query.split()
+                for token in tokens:
+                    disp_df = disp_df[
+                        disp_df['Full Name'].str.lower().str.contains(token) | 
+                        disp_df['SKU'].str.lower().str.contains(token)
+                    ]
+
+            # Apply Sort Mapping
+            sort_map = {
+                "Name": "Full Name",
+                "Category": ["Category", "Full Name"],
+                "Location": ["Location", "Full Name"],
+                "Stock (High-Low)": "Stock"
+            }
+            ascending_logic = False if sort_choice == "Stock (High-Low)" else True
+            disp_df = disp_df.sort_values(by=sort_map[sort_choice], ascending=ascending_logic)
+
+            # 4. Display Result
+            st.dataframe(
+                disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], 
+                use_container_width=True, 
+                hide_index=True
+            )
+            st.caption(f"Showing {len(disp_df)} items")
+        else:
+            st.info("No data available in Master_Inventory. Upload files in the sidebar to begin.")
 
 elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
