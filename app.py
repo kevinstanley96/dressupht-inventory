@@ -465,11 +465,9 @@ if authentication_status:
                 d_df = pd.DataFrame()
     
             # 2. DISPLAY LOG (AT THE TOP)
-            # --- DEPOT TAB FULL HISTORY DISPLAY ---
             st.subheader("Depot Activity History")
             
             if not d_df.empty:
-                # Show all entries with delete option
                 h1, h2, h3, h4, h5, h6 = st.columns([1, 2, 1, 1, 1, 1])
                 h1.write("**Date**")
                 h2.write("**Wig Name**")
@@ -479,7 +477,7 @@ if authentication_status:
                 h6.write("**Action**")
                 st.divider()
             
-                for index, row in d_df.iterrows():   # <-- show ALL rows, not just head(10)
+                for index, row in d_df.iterrows():
                     r1, r2, r3, r4, r5, r6 = st.columns([1, 2, 1, 1, 1, 1])
                     r1.write(row['Date'])
                     r2.write(row['Wig Name'])
@@ -488,7 +486,6 @@ if authentication_status:
                     r4.write(str(row['Quantity']))
                     r5.write(row['User'])
             
-                    # Delete button for each row
                     if r6.button("🗑️ Delete", key=f"del_dep_{row['id']}"):
                         supabase.table("Depot").delete().eq("id", row['id']).execute()
                         st.success(f"Deleted entry for {row['Wig Name']} on {row['Date']}")
@@ -502,27 +499,25 @@ if authentication_status:
             col_d1, col_d2 = st.columns([2, 1])
     
             with col_d1:
-                # --- DEPOT TAB SEARCH BLOCK (Rewritten with multiple options) ---
-                d_search = st.text_input("🔍 Search Item for Depot", placeholder="Search by SKU or Name...", key="dep_search").lower()
+                d_search = st.text_input("🔍 Search Item for Depot (PV only)", 
+                                         placeholder="Search by SKU or Name...", 
+                                         key="dep_search").lower()
                 
+                # Only use PV inventory for Depot searches
+                pv_inventory = master_inventory[master_inventory['Location'] == "Pv"].copy()
+    
                 if d_search:
-                    tokens = d_search.split()
-                    match = master_inventory.copy()
-                    for t in tokens:
-                        match = search_inventory(master_inventory, d_search)
+                    match = search_inventory(pv_inventory, d_search)
                 
                     if not match.empty:
-                        # Let user choose from multiple matches
                         options = match[['SKU', 'Full Name']].apply(lambda x: f"{x['SKU']} - {x['Full Name']}", axis=1).tolist()
                         selected_option = st.selectbox("Select Item", options)
                 
-                        # Extract SKU and Name from selection
                         selected_sku = selected_option.split(" - ")[0]
                         d_item = match[match['SKU'] == selected_sku].iloc[0]
                 
                         st.success(f"Selected: **{d_item['Full Name']}** ({d_item['SKU']})")
                 
-                        # Calculate Current Net Stock in Depot for this SKU
                         if not d_df.empty:
                             sku_df = d_df[d_df['SKU'] == d_item['SKU']]
                             adds = sku_df[sku_df['Type'] == "Addition"]['Quantity'].sum()
@@ -550,7 +545,7 @@ if authentication_status:
                                 time.sleep(1)
                                 st.rerun()
                     else:
-                        st.error("Item not found.")
+                        st.error("Item not found in PV inventory.")
 
     # --- 6. COMPARE TAB ---
     if "Compare" in tab_dict: 
@@ -809,6 +804,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
