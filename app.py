@@ -126,56 +126,56 @@ if authentication_status:
     # --- 1. LIBRARY TAB ---
     if "Library" in tab_dict: 
         with tab_dict["Library"]:
-        try:
-            query = supabase.table("Master_Inventory").select("*").execute()
-            master_inventory = pd.DataFrame(query.data)
-        except Exception:
-            master_inventory = pd.DataFrame()
-    
-        if not master_inventory.empty:
-            # Filter by assigned location
-            if role == "Staff":
-                disp_df = master_inventory[master_inventory['Location'] == loc].copy()
+            try:
+                query = supabase.table("Master_Inventory").select("*").execute()
+                master_inventory = pd.DataFrame(query.data)
+            except Exception:
+                master_inventory = pd.DataFrame()
+        
+            if not master_inventory.empty:
+                # Filter by assigned location
+                if role == "Staff":
+                    disp_df = master_inventory[master_inventory['Location'] == loc].copy()
+                else:
+                    disp_df = master_inventory.copy()
+        
+                c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+                search_query = c1.text_input("🔍 Search", placeholder="Tokenized search...").lower()
+        
+                # Managers/Admins can still filter by location, Staff are locked to their own
+                if role != "Staff":
+                    sel_loc = c2.selectbox("Location", ["All Locations"] + sorted(master_inventory['Location'].unique().tolist()))
+                    if sel_loc != "All Locations":
+                        disp_df = disp_df[disp_df['Location'] == sel_loc]
+                else:
+                    c2.write(f"📍 Location: {loc}")  # Show fixed location for Staff
+                    sel_loc = loc
+        
+                sel_cat = c3.selectbox("Category", ["All Categories"] + sorted(master_inventory['Category'].unique().tolist()))
+                sort_choice = c4.selectbox("Sort By", ["Name", "Category", "Location", "Stock (High-Low)"])
+        
+                # Category filter
+                if sel_cat != "All Categories":
+                    disp_df = disp_df[disp_df['Category'] == sel_cat]
+        
+                # Tokenized Search
+                if search_query:
+                    disp_df = search_inventory(disp_df, search_query)
+        
+                # Sorting
+                sort_map = {
+                    "Name": "Full Name",
+                    "Category": ["Category", "Full Name"],
+                    "Location": ["Location", "Full Name"],
+                    "Stock (High-Low)": "Stock"
+                }
+                ascending_logic = False if sort_choice == "Stock (High-Low)" else True
+                disp_df = disp_df.sort_values(by=sort_map[sort_choice], ascending=ascending_logic)
+        
+                st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
+                st.caption(f"Showing {len(disp_df)} items")
             else:
-                disp_df = master_inventory.copy()
-    
-            c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-            search_query = c1.text_input("🔍 Search", placeholder="Tokenized search...").lower()
-    
-            # Managers/Admins can still filter by location, Staff are locked to their own
-            if role != "Staff":
-                sel_loc = c2.selectbox("Location", ["All Locations"] + sorted(master_inventory['Location'].unique().tolist()))
-                if sel_loc != "All Locations":
-                    disp_df = disp_df[disp_df['Location'] == sel_loc]
-            else:
-                c2.write(f"📍 Location: {loc}")  # Show fixed location for Staff
-                sel_loc = loc
-    
-            sel_cat = c3.selectbox("Category", ["All Categories"] + sorted(master_inventory['Category'].unique().tolist()))
-            sort_choice = c4.selectbox("Sort By", ["Name", "Category", "Location", "Stock (High-Low)"])
-    
-            # Category filter
-            if sel_cat != "All Categories":
-                disp_df = disp_df[disp_df['Category'] == sel_cat]
-    
-            # Tokenized Search
-            if search_query:
-                disp_df = search_inventory(disp_df, search_query)
-    
-            # Sorting
-            sort_map = {
-                "Name": "Full Name",
-                "Category": ["Category", "Full Name"],
-                "Location": ["Location", "Full Name"],
-                "Stock (High-Low)": "Stock"
-            }
-            ascending_logic = False if sort_choice == "Stock (High-Low)" else True
-            disp_df = disp_df.sort_values(by=sort_map[sort_choice], ascending=ascending_logic)
-    
-            st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
-            st.caption(f"Showing {len(disp_df)} items")
-        else:
-            st.info("No data in Master_Inventory.")
+                st.info("No data in Master_Inventory.")
 
     # --- 2. ARRIVAL TAB ---
     if "Arrival" in tab_dict: 
@@ -809,6 +809,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
