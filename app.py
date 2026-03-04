@@ -363,29 +363,190 @@ if authentication_status:
             comp = pd.merge(df_cv, df_pv, on="SKU", how="outer", suffixes=('_CV', '_PV')).fillna(0)
             st.dataframe(comp, use_container_width=True)
 
-    # --- 7. SALES TAB ---
+    # --- 7. SALES (FAST/SLOW MOVERS) ---
     with tabs[6]:
-        st.header("💰 Sales Analysis")
-        st.info("Upload old report to compare current stock via Tokens.")
-        old_file = st.file_uploader("Upload Old Export", type=['xlsx'])
+        st.header("💰 Sales Analysis (Token-Based)")
+        
+        # 1. Upload Old Export
+        old_file = st.file_uploader("Upload Old Square Export (Excel)", type=['xlsx'], key="sales_old_file")
+
         if old_file and not master_inventory.empty:
-            df_old = pd.read_excel(old_file, skiprows=1)
-            # Logic for comparison based on Tokens...
-            st.write("File loaded. Comparison logic processing...")
+            try:
+                df_old = pd.read_excel(old_file, skiprows=1)
+                df_old.columns = [str(c).strip() for c in df_old.columns]
+                
+                token_col = 'Token' if 'Token' in df_old.columns else None
+                old_qty_col = "Current Quantity Dressupht Pv" 
+
+                if not token_col:
+                    st.error("Token column missing in uploaded file.")
+                else:
+                    df_current_pv = master_inventory[master_inventory['Location'] == "Pv"].copy()
+                    
+                    # Merge on Token
+                    sales_comp = pd.merge(
+                        df_old[[token_col, old_qty_col]], 
+                        df_current_pv, 
+                        on=token_col, 
+                        how='inner',
+                        suffixes=('_old', '_current')
+                    )
+
+                    # Calculate Actual Sales (Movement)
+                    sales_comp['Sales'] = pd.to_numeric(sales_comp[old_qty_col], errors='coerce').fillna(0) - sales_comp['Stock']
+                    
+                    # --- A. FULL SALES VIEW ---
+                    st.subheader("📊 All Sales Movement")
+                    full_view = sales_comp[sales_comp['Sales'] != 0].copy()
+                    st.dataframe(
+                        full_view[['Full Name', 'SKU', 'Sales', 'Stock']].rename(columns={'Stock': 'Remaining'}),
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+
+                    st.divider()
+
+                    # --- B. TOP 10 RANKINGS ---
+                    col_s1, col_s2 = st.columns(2)
+                    
+                    with col_s1:
+                        st.subheader("🚀 Top 10 Fast Movers")
+                        # Highest sales count first
+                        fast_10 = sales_comp[sales_comp['Sales'] > 0].sort_values(by='Sales', ascending=False).head(10)
+                        if not fast_10.empty:
+                            st.dataframe(fast_10[['Full Name', 'Sales']], use_container_width=True, hide_index=True)
+                        else:
+                            st.write("No sales recorded.")
+
+                    with col_s2:
+                        st.subheader("🐢 Top 10 Slow Movers")
+                        # Items with 0 or negative sales (returns), showing highest stock sitting idle
+                        slow_10 = sales_comp[sales_comp['Sales'] <= 0].sort_values(by='Stock', ascending=False).head(10)
+                        if not slow_10.empty:
+                            st.dataframe(slow_10[['Full Name', 'Stock']], use_container_width=True, hide_index=True)
+                        else:
+                            st.write("Everything is moving!")
+            
+            except Exception as e:
+                st.error(f"Error processing sales data: {e}")
+        else:
+            st.info("Upload an older Square export to calculate sales movement against current PV stock.")
 
     # --- 8. ADMIN TAB ---
     with tabs[7]:
-        st.header("⚙️ System Administration")
-        if role == "Admin":
-            st.write("Full System Access Granted.")
-            # User management logic here
+        st.header("⚙️ Admin Control Tower")
+        
+        # Restriction: Strictly Admin Only
+        if role != "Admin":
+            st.error("🚫 Access Denied. This section is restricted to System Administrators.")
         else:
-            st.warning("Managers/Staff have limited view here.")
+            admin_subtab = st.tabs(["👤 User Management", "📜 Global Activity Log", "🧹 Database Maintenance"])
+
+            # --- SUB-TAB 1: USER MANAGEMENT ---
+            with admin_subtab[0]:
+                st.subheader("Manage Team Roles & Locations")
+                try:
+                    # Fetching from 'Role' table with your exact columns
+                    users_query = supabase.table("Role").select("*").execute()
+                    users_df = pd.DataFrame(users_query.data)
+                    
+                    if not users_df.empty:
+                        # Displaying your specific columns
+                        st.dataframe(
+                            users_df[['User Name', 'Roles', 'Email', 'Location']], 
+                            use_container_width=True, 
+                            hide_index=True
+                        )
+                        
+                        st.divider()
+                        
+                        col_up1, col_up2 = st.columns(2)
+                        with col_up1:
+                            st.markdown("##### 🔐 Update Permissions")
+                            with st.form("role_update_form"):
+                                target_user = st.selectbox("Select User", users_df['User Name'].unique())
+                                new_role = st.selectbox("Assign New Role", ["Admin", "Manager", "Staff"])
+                                if st.form_submit_button("Update Role"):
+                                    supabase.table("Role").update({"Roles": new_role}).eq("User Name", target_user).execute()
+                                    st.success(f"Updated {target_user} to {new_role}")
+                                    time.sleep(1)
+                                    st.rerun()
+                        
+                        with col_up2:
+                            st.markdown("##### 📍 Update Staff Location")
+                            with st.form("loc_update_form"):
+                                target_user_loc = st.selectbox("Select User", users_df['User Name'].unique())
+                                new_loc = st.selectbox("Assign Location", ["Pv", "Canape-Vert", "Both"])
+                                if st.form_submit_button("Update Location"):
+                                    supabase.table("Role").update({"Location": new_loc}).eq("User Name", target_user_loc).execute()
+                                    st.success(f"Relocated {target_user_loc} to {new_loc}")
+                                    time.sleep(1)
+                                    st.rerun()
+                    else:
+                        st.warning("The Role table is currently empty.")
+                except Exception as e:
+                    st.error(f"Could not load user table: {e}")
+
+            # --- SUB-TAB 2: GLOBAL ACTIVITY LOG ---
+            with admin_subtab[1]:
+                st.subheader("Recent System-Wide Actions")
+                log_choice = st.radio("View Logs From:", ["Arrivals", "Inventory Audits", "Depot Movements", "Mannequin Display"], horizontal=True)
+                
+                # Mapping the selection to your exact Supabase table names
+                table_map = {
+                    "Arrivals": "Arrival",
+                    "Inventory Audits": "Inventory",
+                    "Depot Movements": "Depot",
+                    "Mannequin Display": "Mannequin"
+                }
+                
+                try:
+                    # Fetch the last 50 actions from the selected table
+                    logs = supabase.table(table_map[log_choice]).select("*").execute()
+                    if logs.data:
+                        logs_df = pd.DataFrame(logs.data)
+                        
+                        # Apply a sort if a date column exists
+                        date_cols = ['Date', 'Last_Updated', 'created_at']
+                        found_date = next((c for c in date_cols if c in logs_df.columns), None)
+                        if found_date:
+                            logs_df = logs_df.sort_values(by=found_date, ascending=False)
+                        
+                        st.dataframe(logs_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info(f"No records found in the {log_choice} table.")
+                except Exception as e:
+                    st.error(f"Error fetching logs: {e}")
+
+            # --- SUB-TAB 3: DATABASE MAINTENANCE ---
+            with admin_subtab[2]:
+                st.subheader("Data Management")
+                st.warning("⚠️ These tools allow you to export or manage bulk data.")
+                
+                col_maint1, col_maint2 = st.columns(2)
+                
+                with col_maint1:
+                    st.write("### Export Data")
+                    csv = master_inventory.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Download Master Inventory (CSV)",
+                        data=csv,
+                        file_name=f"Master_Inventory_{date.today()}.csv",
+                        mime='text/csv',
+                    )
+                
+                with col_maint2:
+                    st.write("### System Status")
+                    total_items = len(master_inventory)
+                    st.metric("Total Items in System", total_items)
+                    st.info("To clear or reset database tables, please use the Supabase SQL Editor for safety.")
 
     # --- 9. PASSWORD TAB ---
     with tabs[8]:
-        st.header("🔑 Security")
-        st.write("Contact Admin to reset credentials.")
-
+        st.header("🔑 Password Management")
+        # Pre-integrated reset from the library
+        authenticator.reset_password(username=username)
+        
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
