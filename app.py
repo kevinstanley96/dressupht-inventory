@@ -268,32 +268,39 @@ if authentication_status:
             categories = sorted(master_inventory['Category'].unique().tolist())
             sel_cat = st.selectbox("Select Category", categories)
     
-            # Filter Master Inventory by category (and location if Staff)
+            # Location handling
             if role == "Staff":
-                base_df = master_inventory[(master_inventory['Category'] == sel_cat) & 
-                                           (master_inventory['Location'] == loc)].copy()
+                sel_loc = loc  # Staff locked to their assigned location
+                st.write(f"📍 Location: {sel_loc}")
             else:
-                base_df = master_inventory[master_inventory['Category'] == sel_cat].copy()
+                sel_loc = st.selectbox("Select Location", ["Pv", "Canape-Vert"])
+    
+            # Filter Master Inventory by category + location
+            base_df = master_inventory[(master_inventory['Category'] == sel_cat) & 
+                                       (master_inventory['Location'] == sel_loc)].copy()
     
             # Fetch Exposed (Mannequin) and Depot data
             exp_df = pd.DataFrame(supabase.table("Mannequin").select("*").execute().data or [])
             dep_df = pd.DataFrame(supabase.table("Depot").select("*").execute().data or [])
     
             # Calculate exposed and depot counts per SKU
-            def get_exposed(sku):
-                return int(exp_df[exp_df['SKU'].str.lower() == sku.lower()]['Quantity'].sum()) if not exp_df.empty else 0
+            def get_exposed(sku, location):
+                if exp_df.empty: return 0
+                return int(exp_df[(exp_df['SKU'].str.lower() == sku.lower()) & 
+                                  (exp_df['Location'] == location)]['Quantity'].sum())
     
             def get_depot(sku):
                 if dep_df.empty: return 0
                 dm = dep_df[dep_df['SKU'].str.lower() == sku.lower()]
-                return int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - dm[dm['Type'] == "Withdrawal"]['Quantity'].sum())
+                return int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - 
+                           dm[dm['Type'] == "Withdrawal"]['Quantity'].sum())
     
             # Build grid dataframe
             grid_df = pd.DataFrame({
                 "SKU": base_df['SKU'],
                 "Name": base_df['Full Name'],
                 "System Stock": base_df['Stock'],
-                "Exposed": base_df['SKU'].apply(get_exposed),
+                "Exposed": base_df.apply(lambda r: get_exposed(r['SKU'], r['Location']), axis=1),
                 "Depot": base_df['SKU'].apply(get_depot),
                 "Manual Count": 0,
                 "Returns": 0
@@ -316,7 +323,7 @@ if authentication_status:
                         "Total_Physical": total_phys,
                         "System_Stock": int(row["System Stock"]),
                         "Discrepancy": discrepancy,
-                        "Location": loc
+                        "Location": sel_loc
                     }
                     supabase.table("Inventory").insert(audit_entry).execute()
     
@@ -762,6 +769,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
