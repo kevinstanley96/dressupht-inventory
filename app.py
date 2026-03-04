@@ -107,7 +107,7 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
             item_data = obj.get('item_data', {})
             item_name = item_data.get('name', 'Unknown')
             # Pull category from the Item level
-            cat_name = cat_lookup.get(item_data.get('category_id'), "Uncategorized")
+            cat_name = cat_lookup.get(item_data.get('category_id')) or item_data.get('category', {}).get('name', 'Uncategorized')
             
             for var in item_data.get('variations', []):
                 var_id = var['id']
@@ -476,5 +476,6 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
