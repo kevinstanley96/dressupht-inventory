@@ -5,6 +5,7 @@ import streamlit_authenticator as stauth
 from datetime import datetime, date
 import time
 import io
+import re
 
 # --- 1. PAGE CONFIG ---
 st.set_page_config(page_title="Dressup Haiti Stock", layout="wide")
@@ -260,6 +261,16 @@ if authentication_status:
                         st.error("Could not load arrival logs.")
 
     # --- 3. INVENTORY (AUDIT) TAB ---
+    def sanitize_sheet_name(name: str) -> str:
+        # Remove invalid characters for Excel sheet names
+        cleaned = re.sub(r'[\/\\\?\*
+    
+    \[\]
+    
+    :]', '_', str(name))
+        # Truncate to 31 chars (Excel limit)
+        return cleaned[:31]
+    
     if "Inventory" in tab_dict: 
         with tab_dict["Inventory"]:
             st.header("📜 Audit History by Category")
@@ -282,12 +293,14 @@ if authentication_status:
                         for cat in sorted(df_log['Category'].unique()):
                             cat_df = df_log[df_log['Category'] == cat]
     
-                            # Write each category to its own sheet
-                            cat_df.to_excel(writer, sheet_name=cat[:31], index=False)
+                            # Safe sheet name
+                            safe_name = sanitize_sheet_name(cat)
+                            cat_df.to_excel(writer, sheet_name=safe_name, index=False)
     
                             # Build summary row
                             summary_rows.append({
                                 "Category": cat,
+                                "Sheet Name": safe_name,
                                 "Total Records": len(cat_df),
                                 "Total Physical": cat_df['Total_Physical'].sum(),
                                 "System Stock": cat_df['System_Stock'].sum(),
@@ -763,6 +776,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
