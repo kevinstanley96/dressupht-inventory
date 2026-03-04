@@ -118,14 +118,35 @@ def process_square_json(catalog_json, inventory_json, locations_map):
 
 def fetch_square_data():
     try:
+        # 1. Get Locations
         loc_res = requests.get(f"{SQUARE_API_URL}/locations", headers=HEADERS).json()
-        # Create a map of {Name: ID}
         locations = {l['name']: l['id'] for l in loc_res.get('locations', [])}
         
-        cat_res = requests.get(f"{SQUARE_API_URL}/catalog/list?types=ITEM,CATEGORY", headers=HEADERS).json()
+        # 2. Fetch Catalog with Pagination (The fix for the 100-line limit)
+        all_catalog_objects = []
+        cursor = None
+        
+        while True:
+            url = f"{SQUARE_API_URL}/catalog/list?types=ITEM,CATEGORY"
+            if cursor:
+                url += f"&cursor={cursor}"
+            
+            res = requests.get(url, headers=HEADERS).json()
+            all_catalog_objects.extend(res.get('objects', []))
+            
+            cursor = res.get('cursor')
+            if not cursor:
+                break
+        
+        # 3. Fetch Inventory (Square usually gives all counts, but we can paginate if needed)
+        # Note: inventory/counts also supports cursors, but catalog is usually the bottleneck
         inv_res = requests.get(f"{SQUARE_API_URL}/inventory/counts", headers=HEADERS).json()
         
-        return process_square_json(cat_res, inv_res, locations)
+        # Create a mock catalog structure for our existing process function
+        full_catalog_json = {"objects": all_catalog_objects}
+        
+        return process_square_json(full_catalog_json, inv_res, locations)
+
     except Exception as e:
         st.error(f"API Error: {e}")
         return pd.DataFrame()
@@ -550,6 +571,7 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
 
