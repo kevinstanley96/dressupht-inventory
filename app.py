@@ -124,8 +124,7 @@ if authentication_status:
     tab_dict = {name: tabs[i] for i, name in enumerate(tab_list)}
 
     # --- 1. LIBRARY TAB ---
-    with tab_dict["Depot"]:
-        st.header("📦 Depot Management")
+    with tab_dict["Library"]:
         try:
             query = supabase.table("Master_Inventory").select("*").execute()
             master_inventory = pd.DataFrame(query.data)
@@ -801,6 +800,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
