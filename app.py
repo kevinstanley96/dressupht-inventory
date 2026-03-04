@@ -341,13 +341,13 @@ if authentication_status:
         st.divider()
         d_search = st.text_input("🔍 Depot Search").lower()
         if d_search:
-    # Use .str.contains() correctly and search both Name and SKU
-    name_match = master_inventory['Full Name'].str.lower().str.contains(d_search.lower(), na=False)
-    sku_match = master_inventory['SKU'].str.lower().str.contains(d_search.lower(), na=False)
+            # Use .str.contains() correctly and search both Name and SKU
+            name_match = master_inventory['Full Name'].str.lower().str.contains(d_search.lower(), na=False)
+            sku_match = master_inventory['SKU'].str.lower().str.contains(d_search.lower(), na=False)
     
-    match = master_inventory[name_match | sku_match]
-else:
-    match = pd.DataFrame()
+        match = master_inventory[name_match | sku_match]
+        else:
+            match = pd.DataFrame()
 
     # --- 6. COMPARE TAB ---
     with tabs[5]:
@@ -544,3 +544,4 @@ else:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
