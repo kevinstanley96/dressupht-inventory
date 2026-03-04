@@ -24,11 +24,11 @@ def fetch_master_inventory():
         query = supabase.table("Master_Inventory").select("*").execute()
         df = pd.DataFrame(query.data)
         if not df.empty:
-            # Default sort by Name as per your preference
+            # Default sort by Name
             df = df.sort_values(by="Full Name")
         return df
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error fetching inventory: {e}")
         return pd.DataFrame()
 
 def get_user_role(username):
@@ -40,40 +40,7 @@ def get_user_role(username):
     except Exception:
         return "Staff", "Unknown"
 
-def clean_and_combine(file_cv, file_pv):
-    def process_file(file, loc_name):
-        df = pd.read_excel(file, skiprows=1)
-        df.columns = [str(c).strip() for c in df.columns]
-        
-        # We ADDED 'Token' to the mapping here
-        mapping = {
-            'Item Name': 'Full Name', 
-            'SKU': 'SKU', 
-            'Categories': 'Category', 
-            'Price': 'Price',
-            'Token': 'Token' 
-        }
-        df = df.rename(columns=mapping)
-        
-        stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
-        
-        if 'Token' not in df.columns:
-            df['Token'] = "NO_TOKEN"
-
-        df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int) if stock_col in df.columns else 0
-        df['SKU'] = df['SKU'].astype(str).str.strip().replace(['nan', ''], 'NO_SKU')
-        df['Category'] = df['Category'].fillna("Uncategorized").astype(str)
-        df['Location'] = loc_name
-        df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
-        
-        return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location', 'Token']].copy()
-
-    df1 = process_file(file_cv, "Canape-Vert")
-    df2 = process_file(file_pv, "Pv")
-    return pd.concat([df1, df2], ignore_index=True)
-
-# --- 3. HELPER FUNCTIONS (Continued) ---
-
+# --- SQUARE API LOGIC ---
 SQUARE_API_URL = "https://connect.squareup.com/v2"
 HEADERS = {
     "Square-Version": "2024-01-17", 
@@ -82,11 +49,9 @@ HEADERS = {
 }
 
 def process_square_json(catalog_objects, inventory_counts, locations_map):
-    # Map Category IDs to human-readable names
     categories = {obj['id']: obj.get('category_data', {}).get('name', 'Uncategorized') 
                   for obj in catalog_objects if obj['type'] == 'CATEGORY'}
 
-    # Map Inventory: {(Variation_ID, Location_ID): Quantity}
     counts = {}
     for entry in inventory_counts:
         v_id = entry.get('catalog_object_id')
@@ -94,84 +59,69 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
         qty = int(float(entry.get('quantity', 0)))
         counts[(v_id, l_id)] = qty
 
-    # --- THE CRITICAL MAPPING ---
-    # "Square Dashboard Name": "Your App's Internal Name"
     target_locs = {
         "Dressup Haiti": "Canape-Vert",
-        "Dressupht Pv": "Pv"  # Updated name here
+        "Dressupht Pv": "Pv"
     }
 
     rows = []
     for obj in catalog_objects:
         if obj['type'] == 'ITEM':
-            item_name = obj.get('item_data', {}).get('name', 'Unknown')
-            cat_id = obj.get('item_data', {}).get('category_id')
+            item_data = obj.get('item_data', {})
+            item_name = item_data.get('name', 'Unknown')
+            cat_id = item_data.get('category_id')
             cat_name = categories.get(cat_id, "Uncategorized")
             
-            for var in obj.get('item_data', {}).get('variations', []):
+            for var in item_data.get('variations', []):
                 var_id = var['id']
-                sku = var.get('item_variation_data', {}).get('sku', 'NO_SKU')
-                price = var.get('item_variation_data', {}).get('price_money', {}).get('amount', 0) / 100
+                var_data = var.get('item_variation_data', {})
+                sku = var_data.get('sku', 'NO_SKU')
+                price = var_data.get('price_money', {}).get('amount', 0) / 100
 
-                # Process both locations for every single variation
                 for square_name, app_name in target_locs.items():
                     loc_id = locations_map.get(square_name)
-                    
                     if loc_id:
-                        # Grab the specific stock count for this item + this location
-                        stock_val = counts.get((var_id, loc_id), 0)
-                        
                         rows.append({
                             'SKU': sku,
                             'Full Name': item_name,
-                            'Stock': stock_val,
+                            'Stock': counts.get((var_id, loc_id), 0),
                             'Price': price,
                             'Category': cat_name,
                             'Location': app_name,
                             'Token': var_id
                         })
-    
     return pd.DataFrame(rows)
 
 def fetch_square_data():
     try:
-        # 1. Get Locations and map them accurately
         loc_res = requests.get(f"{SQUARE_API_URL}/locations", headers=HEADERS).json()
-        # strip() ensures we handle names robustly
         locations_dict = {l['name'].strip(): l['id'] for l in loc_res.get('locations', [])}
         
-        # 2. Fetch Catalog (With Pagination)
-        all_catalog_objects = []
+        all_catalog = []
         cursor = None
         while True:
-            url = f"{SQUARE_API_URL}/catalog/list?types=ITEM,CATEGORY"
-            if cursor: url += f"&cursor={cursor}"
+            url = f"{SQUARE_API_URL}/catalog/list?types=ITEM,CATEGORY" + (f"&cursor={cursor}" if cursor else "")
             res = requests.get(url, headers=HEADERS).json()
-            all_catalog_objects.extend(res.get('objects', []))
+            all_catalog.extend(res.get('objects', []))
             cursor = res.get('cursor')
             if not cursor: break
         
-        # 3. Fetch Inventory (With Pagination - Crucial for large inventories)
-        all_inventory_counts = []
+        all_inventory = []
         inv_cursor = None
         while True:
-            # Note: Pagination for inventory uses a slightly different URL param
-            inv_url = f"{SQUARE_API_URL}/inventory/counts"
-            if inv_cursor: 
-                inv_url = f"{SQUARE_API_URL}/inventory/counts?cursor={inv_cursor}"
-            
+            inv_url = f"{SQUARE_API_URL}/inventory/counts" + (f"?cursor={inv_cursor}" if inv_cursor else "")
             inv_res = requests.get(inv_url, headers=HEADERS).json()
-            all_inventory_counts.extend(inv_res.get('counts', []))
+            all_inventory.extend(inv_res.get('counts', []))
             inv_cursor = inv_res.get('cursor')
             if not inv_cursor: break
 
-        return process_square_json(all_catalog_objects, all_inventory_counts, locations_dict)
-
+        return process_square_json(all_catalog, all_inventory, locations_dict)
     except Exception as e:
-        st.error(f"API Error: {e}")
+        st.error(f"API Fetch Error: {e}")
         return pd.DataFrame()
 
 # --- 4. AUTHENTICATION ---
+# (Using your provided credentials logic)
 usernames_list = ["djessie", "kevin", "casimir", "melchisedek", "david", "darius", "eliada", "sebastien", "guirlene", "carmela", "angelina", "tamara", "dorotheline", "sarah", "valerie", "saouda", "marie france", "carelle", "annaelle", "gerdine", "martilda"]
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
 credentials['usernames']['kevin']['password'] = "The$100$Raven"
@@ -184,171 +134,95 @@ if authentication_status:
     role, loc = get_user_role(username)
     master_inventory = fetch_master_inventory()
 
-    # --- SIDEBAR ---
     with st.sidebar:
         st.markdown(f"<h1 style='text-align: center;'>{username.upper()}</h1>", unsafe_allow_html=True)
-        st.write(f"**🛡️ Access:** {role}")
-        st.write(f"**📍 Location:** {loc}")
+        st.write(f"**🛡️ Access:** {role} | **📍 Loc:** {loc}")
         st.divider()
         
         if role in ["Admin", "Manager"]:
             st.subheader("🔄 Square API Sync")
-            if st.button("Sync Live from Square", use_container_width=True):
-                with st.spinner("Fetching live data..."):
+            if st.button("🔄 Sync Live from Square"):
+                with st.status("Syncing Data...", expanded=True) as status:
                     api_df = fetch_square_data()
                     if not api_df.empty:
-                        supabase.table("Master_Inventory").delete().neq("SKU", "VOID").execute()
+                        status.update(label="Wiping old data...", state="running")
+                        supabase.table("Master_Inventory").delete().neq("Price", -1).execute()
+                        time.sleep(1)
+                        status.update(label=f"Uploading {len(api_df)} items...", state="running")
+                        # Batch insert
                         supabase.table("Master_Inventory").insert(api_df.to_dict('records')).execute()
                         st.cache_data.clear()
-                        st.success("API Sync Successful!")
-                        time.sleep(1)
+                        status.update(label="Sync Complete!", state="complete")
                         st.rerun()
-
             st.divider()
-            st.subheader("📦 Manual Excel Sync")
-            f_cv = st.file_uploader("Canape-Vert (Excel)", type=['xlsx'], key="side_cv")
-            f_pv = st.file_uploader("PV (Excel)", type=['xlsx'], key="side_pv")
-            
-            if st.button("🚀 Overwrite via Excel", use_container_width=True):
-                if f_cv and f_pv:
-                    with st.spinner("Processing..."):
-                        final_df = clean_and_combine(f_cv, f_pv)
-                        supabase.table("Master_Inventory").delete().neq("SKU", "VOID").execute()
-                        supabase.table("Master_Inventory").insert(final_df.to_dict('records')).execute()
-                        st.cache_data.clear()
-                        st.success("Database Updated via Excel!")
-                        time.sleep(1)
-                        st.rerun()
-                else:
-                    st.warning("Please upload both files first.")
-        
+
         authenticator.logout('Logout', 'sidebar')
 
-    # --- TABS SETUP ---
-    tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Sales", "Admin", "Password"]
-    tabs = st.tabs(tab_list)
+    tabs = st.tabs(["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Sales", "Admin", "Password"])
 
-    # --- 1. LIBRARY TAB ---
+    # --- 1. LIBRARY ---
     with tabs[0]:
         if not master_inventory.empty:
             c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-            search_query = c1.text_input("🔍 Search", placeholder="Tokenized search...").lower()
-            sel_loc = c2.selectbox("Location", ["All Locations"] + sorted(master_inventory['Location'].unique().tolist()))
-            sel_cat = c3.selectbox("Category", ["All Categories"] + sorted(master_inventory['Category'].unique().tolist()))
-            sort_choice = c4.selectbox("Sort By", ["Name", "Category", "Location", "Stock (High-Low)"])
+            search = c1.text_input("🔍 Search", key="lib_search").lower()
+            sel_loc = c2.selectbox("Location", ["All"] + sorted(master_inventory['Location'].unique().tolist()))
+            sel_cat = c3.selectbox("Category", ["All"] + sorted(master_inventory['Category'].unique().tolist()))
+            sort_choice = c4.selectbox("Sort", ["Name", "Stock (High-Low)"])
 
             disp_df = master_inventory.copy()
-            if sel_loc != "All Locations": disp_df = disp_df[disp_df['Location'] == sel_loc]
-            if sel_cat != "All Categories": disp_df = disp_df[disp_df['Category'] == sel_cat]
-
-            if search_query:
-                for token in search_query.split():
-                    disp_df = disp_df[disp_df['Full Name'].str.lower().str.contains(token) | disp_df['SKU'].str.lower().str.contains(token)]
-
-            sort_map = {"Name": "Full Name", "Category": ["Category", "Full Name"], "Location": ["Location", "Full Name"], "Stock (High-Low)": "Stock"}
-            ascending_logic = False if sort_choice == "Stock (High-Low)" else True
-            disp_df = disp_df.sort_values(by=sort_map[sort_choice], ascending=ascending_logic)
+            if sel_loc != "All": disp_df = disp_df[disp_df['Location'] == sel_loc]
+            if sel_cat != "All": disp_df = disp_df[disp_df['Category'] == sel_cat]
+            if search:
+                disp_df = disp_df[disp_df['Full Name'].str.lower().str.contains(search) | disp_df['SKU'].str.lower().str.contains(search)]
+            
+            if sort_choice == "Name": disp_df = disp_df.sort_values("Full Name")
+            else: disp_df = disp_df.sort_values("Stock", ascending=False)
 
             st.dataframe(disp_df[['Location', 'Category', 'Full Name', 'SKU', 'Stock', 'Price']], use_container_width=True, hide_index=True)
-            st.caption(f"Showing {len(disp_df)} items")
         else:
-            st.info("No data in Master_Inventory.")
+            st.info("No data found. Please sync with Square.")
 
-    # --- 2. ARRIVAL TAB ---
-    with tabs[1]:
-        st.header("🚢 Arrival Management")
-        if role not in ["Admin", "Manager"]:
-            st.warning("🔒 Access Denied. Only Admins and Managers can log new arrivals.")
-        else:
-            if 'arrival_verify' not in st.session_state:
-                st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
-
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                st.subheader("Log Received Stock")
-                in_sku = st.text_input("Scan or Enter SKU", key="arr_sku_input").strip()
-                
-                if in_sku and in_sku != st.session_state.arrival_verify["sku"]:
-                    match = master_inventory[master_inventory['SKU'].str.lower() == in_sku.lower()]
-                    if not match.empty:
-                        st.session_state.arrival_verify = {"name": match['Full Name'].iloc[0], "cat": match['Category'].iloc[0], "sku": in_sku}
-                    else:
-                        st.session_state.arrival_verify = {"name": None, "cat": None, "sku": in_sku}
-                        st.error("SKU not found.")
-
-                if st.session_state.arrival_verify["name"]:
-                    st.info(f"**Item:** {st.session_state.arrival_verify['name']}\n\n**Category:** {st.session_state.arrival_verify['cat']}")
-                    with st.form("arrival_form", clear_on_submit=True):
-                        arr_date = st.date_input("Arrival Date", value=date.today())
-                        arr_qty = st.number_input("Quantity Received", min_value=1, step=1)
-                        arr_loc = st.selectbox("Receiving Location", ["Pv", "Canape-Vert"])
-                        if st.form_submit_button("✅ Confirm Arrival"):
-                            arrival_data = {"Date": str(arr_date), "SKU": st.session_state.arrival_verify["sku"], "Wig Name": st.session_state.arrival_verify["name"], "Category": st.session_state.arrival_verify["cat"], "Quantity": arr_qty, "User": username, "Location": arr_loc}
-                            supabase.table("Arrival").insert(arrival_data).execute()
-                            st.success("Logged Arrival!")
-                            st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
-                            time.sleep(1)
-                            st.rerun()
-            with col2:
-                st.subheader("Recent Arrivals")
-                arr_log = supabase.table("Arrival").select("*").order("Date", desc=True).limit(20).execute()
-                if arr_log.data:
-                    st.dataframe(pd.DataFrame(arr_log.data)[['Date', 'Wig Name', 'Quantity', 'Location', 'User']], use_container_width=True, hide_index=True)
-
-    # --- 3. INVENTORY (AUDIT) TAB ---
+    # --- 3. INVENTORY (AUDIT) ---
     with tabs[2]:
         st.header("📋 Physical Inventory Audit (PV Only)")
-        col_select1, col_select2 = st.columns(2)
-        with col_select1:
-            audit_cat = st.selectbox("1. Select Category to Audit", sorted(master_inventory['Category'].unique().tolist()) if not master_inventory.empty else ["None"])
-        with col_select2:
-            counter = st.selectbox("2. Person Counting", [u.upper() for u in usernames_list])
+        if not master_inventory.empty:
+            audit_cat = st.selectbox("Select Category", sorted(master_inventory['Category'].unique().tolist()))
+            
+            # Sub-fetch for Depot and Mannequin counts
+            exp_q = supabase.table("Mannequin").select("SKU, Quantity").execute()
+            dep_q = supabase.table("Depot").select("SKU, Quantity, Type").execute()
+            df_exp = pd.DataFrame(exp_q.data) if exp_q.data else pd.DataFrame(columns=['SKU', 'Quantity'])
+            df_dep = pd.DataFrame(dep_q.data) if dep_q.data else pd.DataFrame(columns=['SKU', 'Quantity', 'Type'])
 
-        exp_data = supabase.table("Mannequin").select("SKU, Quantity").execute()
-        dep_data = supabase.table("Depot").select("SKU, Quantity, Type").execute()
-        df_exp = pd.DataFrame(exp_data.data) if exp_data.data else pd.DataFrame(columns=['SKU', 'Quantity'])
-        df_dep = pd.DataFrame(dep_data.data) if dep_data.data else pd.DataFrame(columns=['SKU', 'Quantity', 'Type'])
+            cat_items = master_inventory[(master_inventory['Category'] == audit_cat) & (master_inventory['Location'] == "Pv")].copy()
+            
+            if not cat_items.empty:
+                # Calculate Net Depot
+                def get_depot(sku):
+                    if df_dep.empty: return 0
+                    d = df_dep[df_dep['SKU'].str.lower() == sku.lower()]
+                    return int(d[d['Type']=="Addition"]['Quantity'].sum() - d[d['Type']=="Subtraction"]['Quantity'].sum())
 
-        cat_items = master_inventory[(master_inventory['Category'] == audit_cat) & (master_inventory['Location'] == "Pv")].copy()
-        
-        if not cat_items.empty:
-            def get_depot_net(sku):
-                if df_dep.empty: return 0
-                dm = df_dep[df_dep['SKU'].str.lower() == sku.lower()]
-                return int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - dm[dm['Type'] == "Subtraction"]['Quantity'].sum())
+                cat_items['Exposed'] = cat_items['SKU'].apply(lambda x: int(df_exp[df_exp['SKU'].str.lower()==x.lower()]['Quantity'].sum()) if not df_exp.empty else 0)
+                cat_items['Depot'] = cat_items['SKU'].apply(get_depot)
+                cat_items['Shelf'] = 0
 
-            cat_items['Exposed'] = cat_items['SKU'].apply(lambda x: int(df_exp[df_exp['SKU'].str.lower() == x.lower()]['Quantity'].sum()) if not df_exp.empty else 0)
-            cat_items['Depot'] = cat_items['SKU'].apply(get_depot_net)
-            cat_items['Shelf_Count'] = 0
-            cat_items['Returns'] = 0
+                edited = st.data_editor(cat_items[['SKU', 'Full Name', 'Stock', 'Exposed', 'Depot', 'Shelf']], hide_index=True, use_container_width=True)
+                
+                if st.button("💾 Submit Audit"):
+                    audit_entries = []
+                    for _, row in edited.iterrows():
+                        total_phys = row['Shelf'] + row['Exposed'] + row['Depot']
+                        audit_entries.append({
+                            "Date": str(date.today()), "SKU": row['SKU'], "Name": row['Full Name'],
+                            "Category": audit_cat, "Counter_Name": username, "Total_Physical": total_phys,
+                            "System_Stock": row['Stock'], "Discrepancy": total_phys - row['Stock'], "Location": "Pv"
+                        })
+                    supabase.table("Inventory").insert(audit_entries).execute()
+                    st.success("Saved!")
+                    st.rerun()
 
-            edited_df = st.data_editor(
-                cat_items[['SKU', 'Full Name', 'Stock', 'Exposed', 'Depot', 'Shelf_Count', 'Returns']],
-                column_config={"Stock": "System", "Exposed": "📍 Mannequin", "Depot": "📦 Depot", "Shelf_Count": st.column_config.NumberColumn("🏢 Shelf", min_value=0), "Returns": st.column_config.NumberColumn("🔄 Returns", min_value=0)},
-                disabled=["SKU", "Full Name", "Stock", "Exposed", "Depot"], hide_index=True, use_container_width=True, key=f"ed_{audit_cat}"
-            )
-
-            if st.button(f"💾 Submit All {len(edited_df)} Records", use_container_width=True):
-                audit_entries = []
-                for _, row in edited_df.iterrows():
-                    total_phys = int(row['Shelf_Count'] + row['Exposed'] + row['Depot'] + row['Returns'])
-                    audit_entries.append({"Date": str(date.today()), "SKU": str(row['SKU']), "Name": str(row['Full Name']), "Category": str(audit_cat), "Counter_Name": str(counter), "Total_Physical": total_phys, "System_Stock": int(row['Stock']), "Discrepancy": int(total_phys - row['Stock']), "Location": "Pv"})
-                supabase.table("Inventory").insert(audit_entries).execute()
-                st.success("Audit Saved!")
-                time.sleep(1)
-                st.rerun()
-
-        st.divider()
-        st.subheader("Audit History Log")
-        log_sort = st.radio("Sort Log By:", ["Latest Date", "Category"], horizontal=True)
-        log_res = supabase.table("Inventory").select("*").order("id", desc=True).limit(50).execute()
-        if log_res.data:
-            log_df = pd.DataFrame(log_res.data)
-            if log_sort == "Latest Date": log_df = log_df.sort_values(by="id", ascending=False)
-            else: log_df = log_df.sort_values(by=["Category", "Date"], ascending=[True, False])
-            st.dataframe(log_df[['Date', 'Category', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], use_container_width=True, hide_index=True)
-
-    # --- 4. MANNEQUIN TAB ---
+     # --- 4. MANNEQUIN TAB ---
     with tabs[3]:
         st.header("👤 Mannequin Display")
         m_df = pd.DataFrame(supabase.table("Mannequin").select("*").execute().data)
@@ -591,8 +465,3 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
-
-
-
-
-
