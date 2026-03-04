@@ -477,7 +477,7 @@ if authentication_status:
         col_d1, col_d2 = st.columns([2, 1])
 
         with col_d1:
-            # --- DEPOT TAB SEARCH BLOCK (Rewritten) ---
+            # --- DEPOT TAB SEARCH BLOCK (Rewritten with multiple options) ---
             d_search = st.text_input("🔍 Search Item for Depot", placeholder="Search by SKU or Name...", key="dep_search").lower()
             
             if d_search:
@@ -490,8 +490,15 @@ if authentication_status:
                     ]
             
                 if not match.empty:
-                    d_item = match.iloc[0]
-                    st.success(f"Selected: **{d_item['Full Name']}**")
+                    # Let user choose from multiple matches
+                    options = match[['SKU', 'Full Name']].apply(lambda x: f"{x['SKU']} - {x['Full Name']}", axis=1).tolist()
+                    selected_option = st.selectbox("Select Item", options)
+            
+                    # Extract SKU and Name from selection
+                    selected_sku = selected_option.split(" - ")[0]
+                    d_item = match[match['SKU'] == selected_sku].iloc[0]
+            
+                    st.success(f"Selected: **{d_item['Full Name']}** ({d_item['SKU']})")
             
                     # Calculate Current Net Stock in Depot for this SKU
                     if not d_df.empty:
@@ -779,4 +786,5 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
