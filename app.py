@@ -368,14 +368,35 @@ if authentication_status:
         else:
             st.warning("No items found for this category in PV.")
 
-        # 6. Audit History Log (Bottom)
+        # --- 6. AUDIT HISTORY LOG (Bottom) ---
         st.divider()
         st.subheader("Recent Audit Activity")
-        # Sort by the new ID column we created to see the absolute latest entries
-        log_res = supabase.table("Inventory").select("*").order("id", desc=True).limit(20).execute()
+
+        # Sorting Toggle
+        log_sort = st.radio("Sort Log By:", ["Latest Date", "Category"], horizontal=True)
+
+        # Fetch logs
+        log_res = supabase.table("Inventory").select("*").order("id", desc=True).limit(50).execute()
+        
         if log_res.data:
-            st.dataframe(pd.DataFrame(log_res.data)[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
-                         use_container_width=True, hide_index=True)
+            log_df = pd.DataFrame(log_res.data)
+            
+            # Apply sorting logic based on the toggle
+            if log_sort == "Latest Date":
+                # id is a good proxy for entry order, or use 'Date'
+                log_df = log_df.sort_values(by="id", ascending=False)
+            else:
+                # Sort by Category, then by Date within that category
+                log_df = log_df.sort_values(by=["Category", "Date"], ascending=[True, False])
+
+            # Display the table
+            st.dataframe(
+                log_df[['Date', 'Category', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.info("No audit history found.")
 
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
     with tabs[3]:
@@ -810,6 +831,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
