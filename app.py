@@ -145,28 +145,60 @@ if authentication_status:
     role, loc = get_user_role(username)
     master_inventory = fetch_master_inventory()
 
+    # --- SIDEBAR ---
     with st.sidebar:
         st.markdown(f"<h1 style='text-align: center;'>{username.upper()}</h1>", unsafe_allow_html=True)
-        st.write(f"**🛡️ Access:** {role} | **📍 Loc:** {loc}")
+        st.write(f"**🛡️ Access:** {role}")
+        st.write(f"**📍 Location:** {loc}")
         st.divider()
         
         if role in ["Admin", "Manager"]:
+            # --- SECTION A: SQUARE API ---
             st.subheader("🔄 Square API Sync")
             if st.button("🔄 Sync Live from Square"):
                 with st.status("Syncing Data...", expanded=True) as status:
                     api_df = fetch_square_data()
+                    
                     if not api_df.empty:
-                        status.update(label="Wiping old data...", state="running")
+                        status.update(label="Cleaning old records...", state="running")
+                        # Wipes everything to prevent duplicates (763 -> 1526 error)
                         supabase.table("Master_Inventory").delete().neq("Price", -1).execute()
-                        time.sleep(1)
-                        status.update(label=f"Uploading {len(api_df)} items...", state="running")
-                        # Batch insert
+                        
+                        time.sleep(1) # Safety pause
+                        
+                        status.update(label=f"Inserting {len(api_df)} fresh records...", state="running")
                         supabase.table("Master_Inventory").insert(api_df.to_dict('records')).execute()
+                        
                         st.cache_data.clear()
                         status.update(label="Sync Complete!", state="complete")
+                        st.success(f"Library refreshed: {len(api_df)} items.")
+                        time.sleep(1)
                         st.rerun()
+
             st.divider()
 
+            # --- SECTION B: MANUAL EXCEL ---
+            # This is now OUTSIDE the Square button block, so it stays visible
+            st.subheader("📦 Manual Excel Sync")
+            f_cv = st.file_uploader("Canape-Vert (Excel)", type=['xlsx'], key="side_cv")
+            f_pv = st.file_uploader("PV (Excel)", type=['xlsx'], key="side_pv")
+            
+            if st.button("🚀 Overwrite via Excel", use_container_width=True):
+                if f_cv and f_pv:
+                    with st.spinner("Processing Excel files..."):
+                        final_df = clean_and_combine(f_cv, f_pv)
+                        # Clean wipe before manual upload
+                        supabase.table("Master_Inventory").delete().neq("Price", -1).execute()
+                        supabase.table("Master_Inventory").insert(final_df.to_dict('records')).execute()
+                        
+                        st.cache_data.clear()
+                        st.success("Database Updated via Excel!")
+                        time.sleep(1)
+                        st.rerun()
+                else:
+                    st.warning("Please upload both files first.")
+        
+        st.divider()
         authenticator.logout('Logout', 'sidebar')
 
     tabs = st.tabs(["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Sales", "Admin", "Password"])
@@ -476,6 +508,7 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
 
