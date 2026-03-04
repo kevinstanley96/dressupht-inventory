@@ -140,7 +140,7 @@ def clean_and_combine(file_cv, file_pv):
         mapping = {
             'Item Name': 'Full Name', 
             'SKU': 'SKU', 
-            'Category': 'Category', 
+            'Categories': 'Category', 
             'Price': 'Price',
             'Token': 'Token' 
         }
@@ -546,6 +546,7 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
 
