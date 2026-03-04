@@ -570,7 +570,7 @@ if authentication_status:
             # Search within comparison
             comp_search = st.text_input("🔍 Search Comparison", placeholder="Filter by Name or SKU...").lower()
            if comp_search:
-            display_comp = search_inventory(display_comp.rename(columns={'Wig Name':'Full Name'}), comp_search)
+                        display_comp = search_inventory(display_comp.rename(columns={'Wig Name':'Full Name'}), comp_search)
 
             st.dataframe(display_comp, use_container_width=True, hide_index=True)
 
@@ -786,6 +786,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
