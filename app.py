@@ -180,190 +180,190 @@ if authentication_status:
     # --- 2. ARRIVAL TAB ---
     if "Arrival" in tab_dict: 
         with tab_dict["Arrival"]:
-        st.header("🚢 Arrival Management")
-        
-        # Restriction: Only Admins and Managers
-        if role not in ["Admin", "Manager"]:
-            st.warning("🔒 Access Denied. Only Admins and Managers can log new arrivals.")
-        else:
-            # Initialize session state for SKU verification if not exists
-            if 'arrival_verify' not in st.session_state:
-                st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
-
-            col1, col2 = st.columns([1, 2])
-
-            with col1:
-                st.subheader("Log Received Stock")
-                # A. SKU Entry
-                in_sku = st.text_input("Scan or Enter SKU", key="arr_sku_input").strip()
-                
-                # Trigger lookup when SKU changes
-                if in_sku and in_sku != st.session_state.arrival_verify["sku"]:
-                    # Search in Master Inventory (checking PV by default as it's the main intake)
-                    match = master_inventory[master_inventory['SKU'].str.lower() == in_sku.lower()]
+            st.header("🚢 Arrival Management")
+            
+            # Restriction: Only Admins and Managers
+            if role not in ["Admin", "Manager"]:
+                st.warning("🔒 Access Denied. Only Admins and Managers can log new arrivals.")
+            else:
+                # Initialize session state for SKU verification if not exists
+                if 'arrival_verify' not in st.session_state:
+                    st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
+    
+                col1, col2 = st.columns([1, 2])
+    
+                with col1:
+                    st.subheader("Log Received Stock")
+                    # A. SKU Entry
+                    in_sku = st.text_input("Scan or Enter SKU", key="arr_sku_input").strip()
                     
-                    if not match.empty:
-                        # Take the first match found
-                        st.session_state.arrival_verify = {
-                            "name": match['Full Name'].iloc[0],
-                            "cat": match['Category'].iloc[0],
-                            "sku": in_sku
-                        }
-                    else:
-                        st.session_state.arrival_verify = {"name": None, "cat": None, "sku": in_sku}
-                        st.error("SKU not found in Master Inventory. Please check the Library.")
-
-                # B. Data Entry Form (Only shows if SKU is verified)
-                if st.session_state.arrival_verify["name"]:
-                    st.info(f"**Item:** {st.session_state.arrival_verify['name']}\n\n**Category:** {st.session_state.arrival_verify['cat']}")
-                    
-                    with st.form("arrival_form", clear_on_submit=True):
-                        arr_date = st.date_input("Arrival Date", value=date.today())
-                        arr_qty = st.number_input("Quantity Received", min_value=1, step=1)
-                        arr_loc = st.selectbox("Receiving Location", ["Pv", "Canape-Vert"])
+                    # Trigger lookup when SKU changes
+                    if in_sku and in_sku != st.session_state.arrival_verify["sku"]:
+                        # Search in Master Inventory (checking PV by default as it's the main intake)
+                        match = master_inventory[master_inventory['SKU'].str.lower() == in_sku.lower()]
                         
-                        if st.form_submit_button("✅ Confirm Arrival"):
-                            arrival_data = {
-                                "Date": str(arr_date),
-                                "SKU": st.session_state.arrival_verify["sku"],
-                                "Wig Name": st.session_state.arrival_verify["name"],
-                                "Category": st.session_state.arrival_verify["cat"],
-                                "Quantity": arr_qty,
-                                "User": username,
-                                "Location": arr_loc
+                        if not match.empty:
+                            # Take the first match found
+                            st.session_state.arrival_verify = {
+                                "name": match['Full Name'].iloc[0],
+                                "cat": match['Category'].iloc[0],
+                                "sku": in_sku
                             }
+                        else:
+                            st.session_state.arrival_verify = {"name": None, "cat": None, "sku": in_sku}
+                            st.error("SKU not found in Master Inventory. Please check the Library.")
+    
+                    # B. Data Entry Form (Only shows if SKU is verified)
+                    if st.session_state.arrival_verify["name"]:
+                        st.info(f"**Item:** {st.session_state.arrival_verify['name']}\n\n**Category:** {st.session_state.arrival_verify['cat']}")
+                        
+                        with st.form("arrival_form", clear_on_submit=True):
+                            arr_date = st.date_input("Arrival Date", value=date.today())
+                            arr_qty = st.number_input("Quantity Received", min_value=1, step=1)
+                            arr_loc = st.selectbox("Receiving Location", ["Pv", "Canape-Vert"])
                             
-                            # Insert into Supabase 'Arrival' table
-                            supabase.table("Arrival").insert(arrival_data).execute()
-                            
-                            st.success(f"Logged {arr_qty} units of {st.session_state.arrival_verify['name']}")
-                            # Clear verification state for next scan
-                            st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
-                            time.sleep(1)
-                            st.rerun()
-
-            with col2:
-                st.subheader("Recent Arrivals")
-                try:
-                    # Fetch logs from the Arrival table
-                    arr_log = supabase.table("Arrival").select("*").order("Date", desc=True).limit(20).execute()
-                    if arr_log.data:
-                        log_df = pd.DataFrame(arr_log.data)
-                        st.dataframe(
-                            log_df[['Date', 'Wig Name', 'Quantity', 'Location', 'User']], 
-                            use_container_width=True, 
-                            hide_index=True
-                        )
-                    else:
-                        st.write("No recent arrivals logged.")
-                except Exception:
-                    st.error("Could not load arrival logs.")
+                            if st.form_submit_button("✅ Confirm Arrival"):
+                                arrival_data = {
+                                    "Date": str(arr_date),
+                                    "SKU": st.session_state.arrival_verify["sku"],
+                                    "Wig Name": st.session_state.arrival_verify["name"],
+                                    "Category": st.session_state.arrival_verify["cat"],
+                                    "Quantity": arr_qty,
+                                    "User": username,
+                                    "Location": arr_loc
+                                }
+                                
+                                # Insert into Supabase 'Arrival' table
+                                supabase.table("Arrival").insert(arrival_data).execute()
+                                
+                                st.success(f"Logged {arr_qty} units of {st.session_state.arrival_verify['name']}")
+                                # Clear verification state for next scan
+                                st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
+                                time.sleep(1)
+                                st.rerun()
+    
+                with col2:
+                    st.subheader("Recent Arrivals")
+                    try:
+                        # Fetch logs from the Arrival table
+                        arr_log = supabase.table("Arrival").select("*").order("Date", desc=True).limit(20).execute()
+                        if arr_log.data:
+                            log_df = pd.DataFrame(arr_log.data)
+                            st.dataframe(
+                                log_df[['Date', 'Wig Name', 'Quantity', 'Location', 'User']], 
+                                use_container_width=True, 
+                                hide_index=True
+                            )
+                        else:
+                            st.write("No recent arrivals logged.")
+                    except Exception:
+                        st.error("Could not load arrival logs.")
 
     # --- 3. INVENTORY (AUDIT) TAB ---
     if "Inventory" in tab_dict: 
         with tab_dict["Inventory"]:
-        st.header("📋 Physical Inventory ")
-
-        if 'audit_verify' not in st.session_state:
-            st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
-
-        # 1. Fetch live data for calculations
-        try:
-            exp_data = supabase.table("Mannequin").select("*").execute()
-            dep_data = supabase.table("Depot").select("*").execute()
-            df_exp = pd.DataFrame(exp_data.data) if exp_data.data else pd.DataFrame()
-            df_dep = pd.DataFrame(dep_data.data) if dep_data.data else pd.DataFrame()
-        except Exception:
-            df_exp, df_dep = pd.DataFrame(), pd.DataFrame()
-
-        ca, cb = st.columns([1, 2])
-
-        with ca:
-            st.subheader("Audit Entry")
-            counter = st.selectbox("Person Counting", [u.upper() for u in usernames_list])
-            search_input = st.text_input("🔍 Search SKU or Name", key="audit_search").lower()
-            
-            if search_input:
-                pv_master = master_inventory[master_inventory['Location'] == "Pv"]
-                tokens = search_input.split()
-                match = pv_master.copy()
-                for t in tokens:
-                    match = search_inventory(pv_master, search_input)
-                
-                if not match.empty:
-                    selected_item = match.iloc[0]
-                    sku_to_audit = selected_item['SKU']
-                    
-                    e_val = int(df_exp[df_exp['SKU'].str.lower() == sku_to_audit.lower()]['Quantity'].sum()) if not df_exp.empty else 0
-                    d_val = 0
-                    if not df_dep.empty:
-                        dm = df_dep[df_dep['SKU'].str.lower() == sku_to_audit.lower()]
-                        # Note: Summing Depot logic (Additions - Subtractions)
-                        d_val = int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - dm[dm['Type'] == "Subtraction"]['Quantity'].sum())
-
-                    st.session_state.audit_verify = {
-                        "name": selected_item['Full Name'],
-                        "cat": selected_item['Category'],
-                        "sys": int(selected_item['Stock']),
-                        "sku": sku_to_audit,
-                        "auto_exp": e_val,
-                        "auto_depot": d_val
-                    }
-                else:
-                    st.session_state.audit_verify["name"] = None
-
-            if st.session_state.audit_verify["name"]:
-                st.info(f"**Item:** {st.session_state.audit_verify['name']}\n\n**System Stock:** {st.session_state.audit_verify['sys']}")
-                with st.form("audit_form_pv", clear_on_submit=True):
-                    f_shelf = st.number_input("Shelf (Manual Count)", min_value=0, step=1)
-                    f_exp = st.number_input("Exposed (Mannequin)", value=st.session_state.audit_verify["auto_exp"])
-                    f_dep = st.number_input("Depot (Backstock)", value=st.session_state.audit_verify["auto_depot"])
-                    f_ret = st.number_input("Returns", min_value=0, step=1)
-                    
-                    if st.form_submit_button("💾 Save Audit Record"):
-                        total_phys = int(f_shelf + f_exp + f_dep + f_ret)
-                        sys_stock = int(st.session_state.audit_verify["sys"])
-                        discrepancy = int(total_phys - sys_stock)
-                        
-                        audit_entry = {
-                            "Date": str(date.today()),
-                            "SKU": str(st.session_state.audit_verify["sku"]),
-                            "Name": str(st.session_state.audit_verify["name"]),
-                            "Category": str(st.session_state.audit_verify["cat"]),
-                            "Counter_Name": str(counter),
-                            "Total_Physical": total_phys,
-                            "System_Stock": sys_stock,
-                            "Discrepancy": discrepancy,
-                            "Location": "Pv"
-                        }
-                        
-                        # UPDATED TABLE NAME: Inventory
-                        supabase.table("Inventory").insert(audit_entry).execute()
-                        st.success(f"Audit Saved! Discrepancy: {discrepancy}")
-                        st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
-                        time.sleep(1)
-                        st.rerun()
-
-        with cb:
-            st.subheader("Audit History Log")
+            st.header("📋 Physical Inventory ")
+    
+            if 'audit_verify' not in st.session_state:
+                st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
+    
+            # 1. Fetch live data for calculations
             try:
-                # UPDATED TABLE NAME: Inventory
-                # We pull the last 50 audits sorted by date
-                aud_log_res = supabase.table("Inventory").select("*").order("Date", desc=True).limit(50).execute()
+                exp_data = supabase.table("Mannequin").select("*").execute()
+                dep_data = supabase.table("Depot").select("*").execute()
+                df_exp = pd.DataFrame(exp_data.data) if exp_data.data else pd.DataFrame()
+                df_dep = pd.DataFrame(dep_data.data) if dep_data.data else pd.DataFrame()
+            except Exception:
+                df_exp, df_dep = pd.DataFrame(), pd.DataFrame()
+    
+            ca, cb = st.columns([1, 2])
+    
+            with ca:
+                st.subheader("Audit Entry")
+                counter = st.selectbox("Person Counting", [u.upper() for u in usernames_list])
+                search_input = st.text_input("🔍 Search SKU or Name", key="audit_search").lower()
                 
-                if aud_log_res.data:
-                    df_log = pd.DataFrame(aud_log_res.data)
+                if search_input:
+                    pv_master = master_inventory[master_inventory['Location'] == "Pv"]
+                    tokens = search_input.split()
+                    match = pv_master.copy()
+                    for t in tokens:
+                        match = search_inventory(pv_master, search_input)
                     
-                    # Displaying the log with relevant columns
-                    st.dataframe(
-                        df_log[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
-                else:
-                    st.info("No audit records found in the 'Inventory' table yet.")
-            except Exception as e:
-                st.error(f"Error fetching history: {e}")
+                    if not match.empty:
+                        selected_item = match.iloc[0]
+                        sku_to_audit = selected_item['SKU']
+                        
+                        e_val = int(df_exp[df_exp['SKU'].str.lower() == sku_to_audit.lower()]['Quantity'].sum()) if not df_exp.empty else 0
+                        d_val = 0
+                        if not df_dep.empty:
+                            dm = df_dep[df_dep['SKU'].str.lower() == sku_to_audit.lower()]
+                            # Note: Summing Depot logic (Additions - Subtractions)
+                            d_val = int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - dm[dm['Type'] == "Subtraction"]['Quantity'].sum())
+    
+                        st.session_state.audit_verify = {
+                            "name": selected_item['Full Name'],
+                            "cat": selected_item['Category'],
+                            "sys": int(selected_item['Stock']),
+                            "sku": sku_to_audit,
+                            "auto_exp": e_val,
+                            "auto_depot": d_val
+                        }
+                    else:
+                        st.session_state.audit_verify["name"] = None
+    
+                if st.session_state.audit_verify["name"]:
+                    st.info(f"**Item:** {st.session_state.audit_verify['name']}\n\n**System Stock:** {st.session_state.audit_verify['sys']}")
+                    with st.form("audit_form_pv", clear_on_submit=True):
+                        f_shelf = st.number_input("Shelf (Manual Count)", min_value=0, step=1)
+                        f_exp = st.number_input("Exposed (Mannequin)", value=st.session_state.audit_verify["auto_exp"])
+                        f_dep = st.number_input("Depot (Backstock)", value=st.session_state.audit_verify["auto_depot"])
+                        f_ret = st.number_input("Returns", min_value=0, step=1)
+                        
+                        if st.form_submit_button("💾 Save Audit Record"):
+                            total_phys = int(f_shelf + f_exp + f_dep + f_ret)
+                            sys_stock = int(st.session_state.audit_verify["sys"])
+                            discrepancy = int(total_phys - sys_stock)
+                            
+                            audit_entry = {
+                                "Date": str(date.today()),
+                                "SKU": str(st.session_state.audit_verify["sku"]),
+                                "Name": str(st.session_state.audit_verify["name"]),
+                                "Category": str(st.session_state.audit_verify["cat"]),
+                                "Counter_Name": str(counter),
+                                "Total_Physical": total_phys,
+                                "System_Stock": sys_stock,
+                                "Discrepancy": discrepancy,
+                                "Location": "Pv"
+                            }
+                            
+                            # UPDATED TABLE NAME: Inventory
+                            supabase.table("Inventory").insert(audit_entry).execute()
+                            st.success(f"Audit Saved! Discrepancy: {discrepancy}")
+                            st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
+                            time.sleep(1)
+                            st.rerun()
+    
+            with cb:
+                st.subheader("Audit History Log")
+                try:
+                    # UPDATED TABLE NAME: Inventory
+                    # We pull the last 50 audits sorted by date
+                    aud_log_res = supabase.table("Inventory").select("*").order("Date", desc=True).limit(50).execute()
+                    
+                    if aud_log_res.data:
+                        df_log = pd.DataFrame(aud_log_res.data)
+                        
+                        # Displaying the log with relevant columns
+                        st.dataframe(
+                            df_log[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']], 
+                            use_container_width=True, 
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No audit records found in the 'Inventory' table yet.")
+                except Exception as e:
+                    st.error(f"Error fetching history: {e}")
 
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
     if "Mannequin" in tab_dict: 
@@ -809,6 +809,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
