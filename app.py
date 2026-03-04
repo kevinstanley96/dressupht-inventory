@@ -7,7 +7,7 @@ import time
 import io
 
 # --- 1. PAGE CONFIG ---
-st.set_page_config(page_title="Dressupht ERP v6.0", layout="wide")
+st.set_page_config(page_title="Dressup Haiti Stock", layout="wide")
 
 # --- 2. SUPABASE CONNECTION ---
 @st.cache_resource
@@ -239,7 +239,7 @@ if authentication_status:
 
     # --- 3. INVENTORY (AUDIT) TAB ---
     with tabs[2]:
-        st.header("📋 Physical Inventory Audit (PV Only)")
+        st.header("📋 Physical Inventory ")
 
         if 'audit_verify' not in st.session_state:
             st.session_state.audit_verify = {"name": None, "cat": None, "sys": 0, "sku": "", "auto_exp": 0, "auto_depot": 0}
@@ -430,7 +430,7 @@ if authentication_status:
 
     # --- 5. DEPOT (BIG DEPOT) TAB ---
     with tabs[4]:
-        st.header("📦 Depot Management (Backstock)")
+        st.header("📦 Depot Management ")
 
         # 1. FETCH DEPOT DATA
         try:
@@ -532,7 +532,7 @@ if authentication_status:
 
     # --- 6. COMPARE TAB ---
     with tabs[5]:
-        st.header("🔄 Stock Comparison & Thresholds")
+        st.header("🔄 Stock Comparison ")
 
         if not master_inventory.empty:
             # --- PART A: SIDE-BY-SIDE COMPARISON ---
@@ -600,7 +600,7 @@ if authentication_status:
 
     # --- 7. SALES (FAST/SLOW MOVERS) ---
     with tabs[6]:
-        st.header("💰 Sales Analysis (Token-Based)")
+        st.header("💰 Sales Analysis ")
         
         # 1. Upload Old Export
         old_file = st.file_uploader("Upload Old Square Export (Excel)", type=['xlsx'], key="sales_old_file")
@@ -669,7 +669,7 @@ if authentication_status:
 
     # --- 8. ADMIN TAB ---
     with tabs[7]:
-        st.header("⚙️ Admin Control Tower")
+        st.header("⚙️ Admin Control ")
         
         # Restriction: Strictly Admin Only
         if role != "Admin":
@@ -786,6 +786,3 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
-
-
-
