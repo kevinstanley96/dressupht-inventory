@@ -132,22 +132,21 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
     return pd.DataFrame(rows)
 
     def clean_and_combine(file_cv, file_pv):
+    # This function must be indented to stay inside clean_and_combine
     def process_file(file, loc_name):
-        # Read Excel, skipping the first row as per your Square export format
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Mapping Excel columns to Database columns
+        # We use 'Category' here to match your Square export column
         mapping = {
             'Item Name': 'Full Name', 
             'SKU': 'SKU', 
-            'Category': 'Category', # Changed from Categories to Category to match your DB
+            'Category': 'Category', 
             'Price': 'Price',
             'Token': 'Token' 
         }
         df = df.rename(columns=mapping)
         
-        # Determine which stock column to use based on the file uploaded
         stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
         
         if 'Token' not in df.columns:
@@ -163,9 +162,9 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
         df['Location'] = loc_name
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
         
-        # Return only the columns needed for the Master_Inventory table
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location', 'Token']].copy()
 
+    # Now we call the internal function for both files
     df1 = process_file(file_cv, "Canape-Vert")
     df2 = process_file(file_pv, "Pv")
     return pd.concat([df1, df2], ignore_index=True)
@@ -547,6 +546,7 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
 
