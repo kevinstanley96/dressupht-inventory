@@ -8,12 +8,13 @@ import io
 import re
 
 def sanitize_sheet_name(name: str) -> str:
-    # Remove invalid characters for Excel sheet names
-    cleaned = re.sub(r'[\/\\\?\*
-
-\[\]
-
-:]', '_', str(name))
+    # Removes: / \ ? * [ ] :
+    # We use a raw string (r'') and escape the backslash and brackets
+    cleaned = re.sub(r'[\\/*?\[\]:]', '_', str(name))
+    
+    # Excel also doesn't allow the name to be empty or start/end with a single quote
+    cleaned = cleaned.strip("'")
+    
     # Truncate to 31 chars (Excel limit)
     return cleaned[:31]
 
@@ -776,6 +777,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
