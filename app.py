@@ -117,13 +117,15 @@ if authentication_status:
     elif role == "Admin":
         tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Sales", "Admin", "Password"]
     else:
-        # Default fallback (just in case)
         tab_list = ["Library", "Password"]
     
+    # Create tabs and store them in a dictionary keyed by name
     tabs = st.tabs(tab_list)
+    tab_dict = {name: tabs[i] for i, name in enumerate(tab_list)}
 
     # --- 1. LIBRARY TAB ---
-    with tabs[0]:
+    with tab_dict["Depot"]:
+        st.header("📦 Depot Management")
         try:
             query = supabase.table("Master_Inventory").select("*").execute()
             master_inventory = pd.DataFrame(query.data)
@@ -176,7 +178,7 @@ if authentication_status:
             st.info("No data in Master_Inventory.")
 
     # --- 2. ARRIVAL TAB ---
-    with tabs[1]:
+    with tab_dict["Arrival"]:
         st.header("🚢 Arrival Management")
         
         # Restriction: Only Admins and Managers
@@ -257,7 +259,7 @@ if authentication_status:
                     st.error("Could not load arrival logs.")
 
     # --- 3. INVENTORY (AUDIT) TAB ---
-    with tabs[2]:
+    with tab_dict["Inventory"]:
         st.header("📋 Physical Inventory ")
 
         if 'audit_verify' not in st.session_state:
@@ -362,7 +364,7 @@ if authentication_status:
                 st.error(f"Error fetching history: {e}")
 
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
-    with tabs[3]:
+    with tab_dict["Mannequin"]:
         st.header("👤 Mannequin Display Management")
 
         # 1. FETCH & DISPLAY HISTORY (AT THE TOP)
@@ -448,7 +450,7 @@ if authentication_status:
                 st.error("No item found in Master Inventory.")
 
     # --- 5. DEPOT (BIG DEPOT) TAB ---
-    with tabs[4]:
+    with tab_dict["Depot"]:
         st.header("📦 Depot Management ")
 
         # 1. FETCH DEPOT DATA
@@ -547,7 +549,7 @@ if authentication_status:
                     st.error("Item not found.")
 
     # --- 6. COMPARE TAB ---
-    with tabs[5]:
+    with tab_dict["Compare"]:
         st.header("🔄 Stock Comparison ")
 
         if not master_inventory.empty:
@@ -612,7 +614,7 @@ if authentication_status:
             st.info("Please upload inventory files in the sidebar to perform comparison.")
 
     # --- 7. SALES (FAST/SLOW MOVERS) ---
-    with tabs[6]:
+    with tab_dict["Sales"]:
         st.header("💰 Sales Analysis ")
         
         # 1. Upload Old Export
@@ -681,7 +683,7 @@ if authentication_status:
             st.info("Upload an older Square export to calculate sales movement against current PV stock.")
 
     # --- 8. ADMIN TAB ---
-    with tabs[7]:
+    with tab_dict["Admin"]:
         st.header("⚙️ Admin Control ")
         
         # Restriction: Strictly Admin Only
@@ -790,7 +792,7 @@ if authentication_status:
                     st.info("To clear or reset database tables, please use the Supabase SQL Editor for safety.")
 
     # --- 9. PASSWORD TAB ---
-    with tabs[8]:
+    with tab_dict["Password"]:
         st.header("🔑 Password Management")
         # Pre-integrated reset from the library
         authenticator.reset_password(username=username)
@@ -799,6 +801,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
