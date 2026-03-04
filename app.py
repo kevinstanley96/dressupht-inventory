@@ -274,31 +274,76 @@ if authentication_status:
     # --- 3. INVENTORY (AUDIT) TAB ---    
     if "Inventory" in tab_dict: 
         with tab_dict["Inventory"]:
-            st.header("📜 Audit History by Category")
+            st.header("📋 Physical Inventory Grid")
     
+            # --- ENTRY LOGIC ---
             try:
-                # Fetch all audit records
+                # Load master inventory
+                query = supabase.table("Master_Inventory").select("*").execute()
+                master_inventory = pd.DataFrame(query.data) if query.data else pd.DataFrame()
+            except Exception:
+                master_inventory = pd.DataFrame()
+    
+            if not master_inventory.empty:
+                # Filter by location if Staff
+                if role == "Staff":
+                    inv_df = master_inventory[master_inventory['Location'] == loc].copy()
+                else:
+                    inv_df = master_inventory.copy()
+    
+                # Category selection
+                sel_cat = st.selectbox("Select Category", sorted(inv_df['Category'].unique()))
+                cat_df = inv_df[inv_df['Category'] == sel_cat].copy()
+    
+                # Add editable column for physical counts
+                cat_df['Total_Physical'] = 0
+                edited_df = st.data_editor(
+                    cat_df[['Full Name','SKU','Stock','Total_Physical']],
+                    num_rows="dynamic",
+                    use_container_width=True
+                )
+    
+                # Save audit entries
+                if st.button("✅ Save Audit"):
+                    for _, row in edited_df.iterrows():
+                        audit_entry = {
+                            "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "Name": row['Full Name'],
+                            "Category": sel_cat,
+                            "System_Stock": row['Stock'],
+                            "Total_Physical": row['Total_Physical'],
+                            "Discrepancy": row['Total_Physical'] - row['Stock'],
+                            "Counter_Name": username,
+                            "Location": loc
+                        }
+                        supabase.table("Inventory").insert(audit_entry).execute()
+                    st.success("Audit saved successfully!")
+                    time.sleep(1)
+                    st.rerun()
+            else:
+                st.info("No data in Master_Inventory.")
+    
+            st.divider()
+            st.subheader("📜 Audit History by Category")
+    
+            # --- HISTORY + EXCEL EXPORT ---
+            try:
                 aud_log_res = supabase.table("Inventory").select("*").order("Date", desc=True).execute()
                 if aud_log_res.data:
                     df_log = pd.DataFrame(aud_log_res.data)
     
-                    # Filter by location if Staff
                     if role == "Staff":
                         df_log = df_log[df_log['Location'] == loc]
     
-                    # --- Build Excel file in memory ---
                     output = io.BytesIO()
                     summary_rows = []
     
                     with pd.ExcelWriter(output, engine="openpyxl") as writer:
                         for cat in sorted(df_log['Category'].unique()):
                             cat_df = df_log[df_log['Category'] == cat]
-    
-                            # Safe sheet name
                             safe_name = sanitize_sheet_name(cat)
                             cat_df.to_excel(writer, sheet_name=safe_name, index=False)
     
-                            # Build summary row
                             summary_rows.append({
                                 "Category": cat,
                                 "Sheet Name": safe_name,
@@ -308,7 +353,7 @@ if authentication_status:
                                 "Total Discrepancy": cat_df['Discrepancy'].sum()
                             })
     
-                            # --- In-app table for this category ---
+                            # In-app table
                             st.markdown(f"### 📂 {cat}")
                             st.dataframe(
                                 cat_df[['Date','Name','Total_Physical','System_Stock','Discrepancy','Counter_Name']],
@@ -316,11 +361,9 @@ if authentication_status:
                                 hide_index=True
                             )
     
-                        # Add summary sheet
                         summary_df = pd.DataFrame(summary_rows)
                         summary_df.to_excel(writer, sheet_name="Summary", index=False)
     
-                    # --- Download button ---
                     st.download_button(
                         label="⬇️ Download Full Audit History (Excel with Sheets + Summary)",
                         data=output.getvalue(),
@@ -328,7 +371,6 @@ if authentication_status:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
     
-                    # --- In-app summary preview ---
                     st.divider()
                     st.subheader("📊 Summary Preview")
                     st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -777,6 +819,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
