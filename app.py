@@ -109,18 +109,17 @@ if authentication_status:
         
         authenticator.logout('Logout', 'sidebar')
 
-    # --- TABS SETUP ---
-    tab_list = [
-        "Library", 
-        "Arrival", 
-        "Inventory", 
-        "Mannequin", 
-        "Depot", 
-        "Compare", 
-        "Sales", 
-        "Admin", 
-        "Password"
-    ]
+    # --- TABS SETUP BASED ON ROLE ---
+    if role == "Staff":
+        tab_list = ["Library", "Mannequin", "Depot", "Password"]
+    elif role == "Manager":
+        tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Password"]
+    elif role == "Admin":
+        tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Sales", "Admin", "Password"]
+    else:
+        # Default fallback (just in case)
+        tab_list = ["Library", "Password"]
+    
     tabs = st.tabs(tab_list)
 
     # --- 1. LIBRARY TAB (Functional) ---
@@ -789,6 +788,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
