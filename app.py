@@ -49,9 +49,13 @@ HEADERS = {
 }
 
 def process_square_json(catalog_objects, inventory_counts, locations_map):
-    categories = {obj['id']: obj.get('category_data', {}).get('name', 'Uncategorized') 
-                  for obj in catalog_objects if obj['type'] == 'CATEGORY'}
+    # 1. Map Category IDs to Names (Parent Level)
+    categories = {}
+    for obj in catalog_objects:
+        if obj['type'] == 'CATEGORY':
+            categories[obj['id']] = obj.get('category_data', {}).get('name', 'Uncategorized')
 
+    # 2. Map Inventory: {(Variation_ID, Location_ID): Quantity}
     counts = {}
     for entry in inventory_counts:
         v_id = entry.get('catalog_object_id')
@@ -69,27 +73,37 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
         if obj['type'] == 'ITEM':
             item_data = obj.get('item_data', {})
             item_name = item_data.get('name', 'Unknown')
+            
+            # GET CATEGORY HERE (At Item level)
             cat_id = item_data.get('category_id')
             cat_name = categories.get(cat_id, "Uncategorized")
             
             for var in item_data.get('variations', []):
-                var_id = var['id']
+                var_id = var['id'] # This is the "Token"
                 var_data = var.get('item_variation_data', {})
                 sku = var_data.get('sku', 'NO_SKU')
-                price = var_data.get('price_money', {}).get('amount', 0) / 100
+                
+                # Handle Price
+                price_money = var_data.get('price_money', {})
+                price = price_money.get('amount', 0) / 100
 
                 for square_name, app_name in target_locs.items():
                     loc_id = locations_map.get(square_name)
+                    
                     if loc_id:
+                        # Fetch stock using the Variation ID
+                        stock_val = counts.get((var_id, loc_id), 0)
+                        
                         rows.append({
-                            'SKU': sku,
+                            'SKU': str(sku).strip(),
                             'Full Name': item_name,
-                            'Stock': counts.get((var_id, loc_id), 0),
+                            'Stock': stock_val,
                             'Price': price,
-                            'Category': cat_name,
+                            'Category': cat_name, # Now correctly inherited from Item
                             'Location': app_name,
                             'Token': var_id
                         })
+    
     return pd.DataFrame(rows)
 
 def fetch_square_data():
@@ -465,3 +479,4 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
