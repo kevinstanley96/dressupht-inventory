@@ -368,458 +368,447 @@ if authentication_status:
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
     if "Mannequin" in tab_dict: 
         with tab_dict["Mannequin"]:
-        st.header("👤 Mannequin Display Management")
-
-        # 1. FETCH & DISPLAY HISTORY (AT THE TOP)
-        st.subheader("Current Wigs on Display")
-        try:
-            m_query = supabase.table("Mannequin").select("*").execute()
-            m_df = pd.DataFrame(m_query.data) if m_query.data else pd.DataFrame()
-            
-            if not m_df.empty:
-                # Sort by Last_Updated string so newest entries appear first
-                m_df = m_df.sort_values(by="Last_Updated", ascending=False)
-
-                st.write(f"**Total Items on Display:** {int(m_df['Quantity'].sum())}")
-
-                # Table Header
-                h1, h2, h3, h4, h5 = st.columns([1, 2, 1, 2, 1])
-                h1.write("**SKU**")
-                h2.write("**Name**")
-                h3.write("**Qty**")
-                h4.write("**Last Updated**")
-                h5.write("**Action**")
-                st.divider()
-
-                # Row display with Delete functionality based on SKU + Location
-                for index, row in m_df.iterrows():
-                    r1, r2, r3, r4, r5 = st.columns([1, 2, 1, 2, 1])
-                    r1.write(row['SKU'])
-                    r2.write(row['Full Name'])
-                    r3.write(str(row['Quantity']))
-                    r4.write(row['Last_Updated'])
-                    
-                    # DELETE BUTTON: Uses SKU and Location to find the row
-                    if r5.button("🗑️ Delete", key=f"del_man_{row['SKU']}_{row['Location']}"):
-                        supabase.table("Mannequin").delete().eq("SKU", row['SKU']).eq("Location", row['Location']).execute()
-                        st.success(f"Removed {row['Full Name']} from display.")
-                        time.sleep(0.5)
-                        st.rerun()
-            else:
-                st.info("No wigs currently on display.")
-        except Exception as e:
-            st.error(f"Error loading Mannequin history: {e}")
-
-        st.divider()
-
-        # 2. LOG IN OPTIONS (AT THE BOTTOM)
-        st.subheader("Add/Update Display")
-        
-        # Tokenized Search (Name or SKU)
-        m_search = st.text_input("🔍 Search Item to Display", placeholder="Type Name or SKU...").lower()
-        
-        if m_search:
-            tokens = m_search.split()
-            match = master_inventory.copy()
-            for t in tokens:
-                match = search_inventory(master_inventory, m_search)
-            
-            if not match.empty:
-                m_item = match.iloc[0]
-                st.success(f"Selected: **{m_item['Full Name']}** ({m_item['SKU']})")
+            st.header("👤 Mannequin Display Management")
+    
+            # 1. FETCH & DISPLAY HISTORY (AT THE TOP)
+            st.subheader("Current Wigs on Display")
+            try:
+                m_query = supabase.table("Mannequin").select("*").execute()
+                m_df = pd.DataFrame(m_query.data) if m_query.data else pd.DataFrame()
                 
-                with st.form("man_form", clear_on_submit=True):
-                    # Constraints: Max 2, Current Date only
-                    m_qty = st.number_input("Quantity", min_value=1, max_value=2, step=1)
-                    m_loc = st.selectbox("Location", ["Pv", "Canape-Vert"], index=0 if m_item['Location'] == "Pv" else 1)
+                if not m_df.empty:
+                    # Sort by Last_Updated string so newest entries appear first
+                    m_df = m_df.sort_values(by="Last_Updated", ascending=False)
+    
+                    st.write(f"**Total Items on Display:** {int(m_df['Quantity'].sum())}")
+    
+                    # Table Header
+                    h1, h2, h3, h4, h5 = st.columns([1, 2, 1, 2, 1])
+                    h1.write("**SKU**")
+                    h2.write("**Name**")
+                    h3.write("**Qty**")
+                    h4.write("**Last Updated**")
+                    h5.write("**Action**")
+                    st.divider()
+    
+                    # Row display with Delete functionality based on SKU + Location
+                    for index, row in m_df.iterrows():
+                        r1, r2, r3, r4, r5 = st.columns([1, 2, 1, 2, 1])
+                        r1.write(row['SKU'])
+                        r2.write(row['Full Name'])
+                        r3.write(str(row['Quantity']))
+                        r4.write(row['Last_Updated'])
+                        
+                        # DELETE BUTTON: Uses SKU and Location to find the row
+                        if r5.button("🗑️ Delete", key=f"del_man_{row['SKU']}_{row['Location']}"):
+                            supabase.table("Mannequin").delete().eq("SKU", row['SKU']).eq("Location", row['Location']).execute()
+                            st.success(f"Removed {row['Full Name']} from display.")
+                            time.sleep(0.5)
+                            st.rerun()
+                else:
+                    st.info("No wigs currently on display.")
+            except Exception as e:
+                st.error(f"Error loading Mannequin history: {e}")
+    
+            st.divider()
+    
+            # 2. LOG IN OPTIONS (AT THE BOTTOM)
+            st.subheader("Add/Update Display")
+            
+            # Tokenized Search (Name or SKU)
+            m_search = st.text_input("🔍 Search Item to Display", placeholder="Type Name or SKU...").lower()
+            
+            if m_search:
+                tokens = m_search.split()
+                match = master_inventory.copy()
+                for t in tokens:
+                    match = search_inventory(master_inventory, m_search)
+                
+                if not match.empty:
+                    m_item = match.iloc[0]
+                    st.success(f"Selected: **{m_item['Full Name']}** ({m_item['SKU']})")
                     
-                    if st.form_submit_button("🚀 Set on Mannequin"):
-                        man_entry = {
-                            "SKU": str(m_item['SKU']),
-                            "Full Name": str(m_item['Full Name']),
-                            "Quantity": int(m_qty),
-                            "Location": str(m_loc),
-                            "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")
-                        }
+                    with st.form("man_form", clear_on_submit=True):
+                        # Constraints: Max 2, Current Date only
+                        m_qty = st.number_input("Quantity", min_value=1, max_value=2, step=1)
+                        m_loc = st.selectbox("Location", ["Pv", "Canape-Vert"], index=0 if m_item['Location'] == "Pv" else 1)
                         
-                        # Upsert logic: Delete existing for that SKU+Location then insert fresh
-                        supabase.table("Mannequin").delete().eq("SKU", m_item['SKU']).eq("Location", m_loc).execute()
-                        supabase.table("Mannequin").insert(man_entry).execute()
-                        
-                        st.success(f"Updated display for {m_item['Full Name']}!")
-                        time.sleep(1)
-                        st.rerun()
-            else:
-                st.error("No item found in Master Inventory.")
+                        if st.form_submit_button("🚀 Set on Mannequin"):
+                            man_entry = {
+                                "SKU": str(m_item['SKU']),
+                                "Full Name": str(m_item['Full Name']),
+                                "Quantity": int(m_qty),
+                                "Location": str(m_loc),
+                                "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")
+                            }
+                            
+                            # Upsert logic: Delete existing for that SKU+Location then insert fresh
+                            supabase.table("Mannequin").delete().eq("SKU", m_item['SKU']).eq("Location", m_loc).execute()
+                            supabase.table("Mannequin").insert(man_entry).execute()
+                            
+                            st.success(f"Updated display for {m_item['Full Name']}!")
+                            time.sleep(1)
+                            st.rerun()
+                else:
+                    st.error("No item found in Master Inventory.")
 
     # --- 5. DEPOT (BIG DEPOT) TAB ---
     if "Depot" in tab_dict: 
         with tab_dict["Depot"]:
-        st.header("📦 Depot Management ")
-
-        # 1. FETCH DEPOT DATA
-        try:
-            d_query = supabase.table("Depot").select("*").order("Date", desc=True).execute()
-            d_df = pd.DataFrame(d_query.data) if d_query.data else pd.DataFrame()
-        except Exception:
-            d_df = pd.DataFrame()
-
-        # 2. DISPLAY LOG (AT THE TOP)
-        # --- DEPOT TAB FULL HISTORY DISPLAY ---
-        st.subheader("Depot Activity History")
-        
-        if not d_df.empty:
-            # Show all entries with delete option
-            h1, h2, h3, h4, h5, h6 = st.columns([1, 2, 1, 1, 1, 1])
-            h1.write("**Date**")
-            h2.write("**Wig Name**")
-            h3.write("**Type**")
-            h4.write("**Qty**")
-            h5.write("**User**")
-            h6.write("**Action**")
-            st.divider()
-        
-            for index, row in d_df.iterrows():   # <-- show ALL rows, not just head(10)
-                r1, r2, r3, r4, r5, r6 = st.columns([1, 2, 1, 1, 1, 1])
-                r1.write(row['Date'])
-                r2.write(row['Wig Name'])
-                type_color = "🟢" if row['Type'] == "Addition" else "🔴"
-                r3.write(f"{type_color} {row['Type']}")
-                r4.write(str(row['Quantity']))
-                r5.write(row['User'])
-        
-                # Delete button for each row
-                if r6.button("🗑️ Delete", key=f"del_dep_{row['id']}"):
-                    supabase.table("Depot").delete().eq("id", row['id']).execute()
-                    st.success(f"Deleted entry for {row['Wig Name']} on {row['Date']}")
-                    time.sleep(0.5)
-                    st.rerun()
-        else:
-            st.info("No activity recorded in the Depot yet.")
+            st.header("📦 Depot Management ")
     
-        # 3. LOG IN OPTIONS (AT THE BOTTOM)
-        st.subheader("Log Depot Movement")
-        col_d1, col_d2 = st.columns([2, 1])
-
-        with col_d1:
-            # --- DEPOT TAB SEARCH BLOCK (Rewritten with multiple options) ---
-            d_search = st.text_input("🔍 Search Item for Depot", placeholder="Search by SKU or Name...", key="dep_search").lower()
+            # 1. FETCH DEPOT DATA
+            try:
+                d_query = supabase.table("Depot").select("*").order("Date", desc=True).execute()
+                d_df = pd.DataFrame(d_query.data) if d_query.data else pd.DataFrame()
+            except Exception:
+                d_df = pd.DataFrame()
+    
+            # 2. DISPLAY LOG (AT THE TOP)
+            # --- DEPOT TAB FULL HISTORY DISPLAY ---
+            st.subheader("Depot Activity History")
             
-            if d_search:
-                tokens = d_search.split()
-                match = master_inventory.copy()
-                for t in tokens:
-                    match = search_inventory(master_inventory, d_search)
+            if not d_df.empty:
+                # Show all entries with delete option
+                h1, h2, h3, h4, h5, h6 = st.columns([1, 2, 1, 1, 1, 1])
+                h1.write("**Date**")
+                h2.write("**Wig Name**")
+                h3.write("**Type**")
+                h4.write("**Qty**")
+                h5.write("**User**")
+                h6.write("**Action**")
+                st.divider()
             
-                if not match.empty:
-                    # Let user choose from multiple matches
-                    options = match[['SKU', 'Full Name']].apply(lambda x: f"{x['SKU']} - {x['Full Name']}", axis=1).tolist()
-                    selected_option = st.selectbox("Select Item", options)
+                for index, row in d_df.iterrows():   # <-- show ALL rows, not just head(10)
+                    r1, r2, r3, r4, r5, r6 = st.columns([1, 2, 1, 1, 1, 1])
+                    r1.write(row['Date'])
+                    r2.write(row['Wig Name'])
+                    type_color = "🟢" if row['Type'] == "Addition" else "🔴"
+                    r3.write(f"{type_color} {row['Type']}")
+                    r4.write(str(row['Quantity']))
+                    r5.write(row['User'])
             
-                    # Extract SKU and Name from selection
-                    selected_sku = selected_option.split(" - ")[0]
-                    d_item = match[match['SKU'] == selected_sku].iloc[0]
-            
-                    st.success(f"Selected: **{d_item['Full Name']}** ({d_item['SKU']})")
-            
-                    # Calculate Current Net Stock in Depot for this SKU
-                    if not d_df.empty:
-                        sku_df = d_df[d_df['SKU'] == d_item['SKU']]
-                        adds = sku_df[sku_df['Type'] == "Addition"]['Quantity'].sum()
-                        subs = sku_df[sku_df['Type'] == "Withdrawal"]['Quantity'].sum()
-                        net_depot = adds - subs
-                        st.metric("Current Net in Depot", f"{int(net_depot)} units")
-            
-                    with st.form("depot_form", clear_on_submit=True):
-                        d_type = st.radio("Movement Type", ["Addition", "Withdrawal"], horizontal=True)
-                        d_qty = st.number_input("Quantity", min_value=1, step=1)
-                        d_date = st.date_input("Date", value=date.today())
-            
-                        if st.form_submit_button("Confirm Depot Entry"):
-                            dep_entry = {
-                                "Date": str(d_date),
-                                "SKU": str(d_item['SKU']),
-                                "Wig Name": str(d_item['Full Name']),
-                                "Type": d_type,
-                                "Quantity": int(d_qty),
-                                "User": str(username)
-                            }
-            
-                            supabase.table("Depot").insert(dep_entry).execute()
-                            st.success(f"Recorded {d_type} for {d_item['Full Name']}")
-                            time.sleep(1)
-                            st.rerun()
-                else:
-                    st.error("Item not found.")
+                    # Delete button for each row
+                    if r6.button("🗑️ Delete", key=f"del_dep_{row['id']}"):
+                        supabase.table("Depot").delete().eq("id", row['id']).execute()
+                        st.success(f"Deleted entry for {row['Wig Name']} on {row['Date']}")
+                        time.sleep(0.5)
+                        st.rerun()
+            else:
+                st.info("No activity recorded in the Depot yet.")
+        
+            # 3. LOG IN OPTIONS (AT THE BOTTOM)
+            st.subheader("Log Depot Movement")
+            col_d1, col_d2 = st.columns([2, 1])
+    
+            with col_d1:
+                # --- DEPOT TAB SEARCH BLOCK (Rewritten with multiple options) ---
+                d_search = st.text_input("🔍 Search Item for Depot", placeholder="Search by SKU or Name...", key="dep_search").lower()
+                
+                if d_search:
+                    tokens = d_search.split()
+                    match = master_inventory.copy()
+                    for t in tokens:
+                        match = search_inventory(master_inventory, d_search)
+                
+                    if not match.empty:
+                        # Let user choose from multiple matches
+                        options = match[['SKU', 'Full Name']].apply(lambda x: f"{x['SKU']} - {x['Full Name']}", axis=1).tolist()
+                        selected_option = st.selectbox("Select Item", options)
+                
+                        # Extract SKU and Name from selection
+                        selected_sku = selected_option.split(" - ")[0]
+                        d_item = match[match['SKU'] == selected_sku].iloc[0]
+                
+                        st.success(f"Selected: **{d_item['Full Name']}** ({d_item['SKU']})")
+                
+                        # Calculate Current Net Stock in Depot for this SKU
+                        if not d_df.empty:
+                            sku_df = d_df[d_df['SKU'] == d_item['SKU']]
+                            adds = sku_df[sku_df['Type'] == "Addition"]['Quantity'].sum()
+                            subs = sku_df[sku_df['Type'] == "Withdrawal"]['Quantity'].sum()
+                            net_depot = adds - subs
+                            st.metric("Current Net in Depot", f"{int(net_depot)} units")
+                
+                        with st.form("depot_form", clear_on_submit=True):
+                            d_type = st.radio("Movement Type", ["Addition", "Withdrawal"], horizontal=True)
+                            d_qty = st.number_input("Quantity", min_value=1, step=1)
+                            d_date = st.date_input("Date", value=date.today())
+                
+                            if st.form_submit_button("Confirm Depot Entry"):
+                                dep_entry = {
+                                    "Date": str(d_date),
+                                    "SKU": str(d_item['SKU']),
+                                    "Wig Name": str(d_item['Full Name']),
+                                    "Type": d_type,
+                                    "Quantity": int(d_qty),
+                                    "User": str(username)
+                                }
+                
+                                supabase.table("Depot").insert(dep_entry).execute()
+                                st.success(f"Recorded {d_type} for {d_item['Full Name']}")
+                                time.sleep(1)
+                                st.rerun()
+                    else:
+                        st.error("Item not found.")
 
     # --- 6. COMPARE TAB ---
     if "Compare" in tab_dict: 
         with tab_dict["Compare"]:
-        st.header("🔄 Stock Comparison ")
-
-        if not master_inventory.empty:
-            # --- PART A: SIDE-BY-SIDE COMPARISON ---
-            st.subheader("Location Comparison (CV vs PV)")
-            
-            # Split the master inventory into two dataframes
-            df_cv = master_inventory[master_inventory['Location'] == "Canape-Vert"][['SKU', 'Full Name', 'Stock', 'Category']]
-            df_pv = master_inventory[master_inventory['Location'] == "Pv"][['SKU', 'Full Name', 'Stock']]
-            
-            # Merge on SKU to show them side-by-side. 
-            # How='outer' ensures that if a SKU is in CV but not PV (or vice versa), it still shows.
-            comparison_df = pd.merge(
-                df_cv, 
-                df_pv, 
-                on="SKU", 
-                how="outer", 
-                suffixes=('_CV', '_PV')
-            )
-            
-            # Clean up the merged data
-            comparison_df['Full Name_CV'] = comparison_df['Full Name_CV'].fillna(comparison_df['Full Name_PV'])
-            comparison_df['Stock_CV'] = comparison_df['Stock_CV'].fillna(0).astype(int)
-            comparison_df['Stock_PV'] = comparison_df['Stock_PV'].fillna(0).astype(int)
-            
-            # Formatting for display
-            display_comp = comparison_df[['SKU', 'Full Name_CV', 'Stock_CV', 'Stock_PV']].rename(columns={
-                'Full Name_CV': 'Wig Name',
-                'Stock_CV': 'Qty (Canape-Vert)',
-                'Stock_PV': 'Qty (PV)'
-            })
-
-            # Search within comparison
-            comp_search = st.text_input("🔍 Search Comparison", placeholder="Filter by Name or SKU...").lower()
-            if comp_search:
-                display_comp = search_inventory(display_comp.rename(columns={'Wig Name':'Full Name'}), comp_search)
-
-            st.dataframe(display_comp, use_container_width=True, hide_index=True)
-
-            st.divider()
-
-            # --- PART B: OVER 50 STOCK CHECK ---
-            st.subheader("🔥 High Stock Alert (Over 50 Units)")
-            col_high1, col_high2 = st.columns(2)
-
-            with col_high1:
-                st.markdown("##### 📍 Canape-Vert (> 50)")
-                high_cv = df_cv[df_cv['Stock'] > 50].sort_values(by="Stock", ascending=False)
-                if not high_cv.empty:
-                    st.dataframe(high_cv[['SKU', 'Full Name', 'Stock']], use_container_width=True, hide_index=True)
-                else:
-                    st.write("No items over 50 in Canape-Vert.")
-
-            with col_high2:
-                st.markdown("##### 📍 PV (> 50)")
-                high_pv = df_pv[df_pv['Stock'] > 50].sort_values(by="Stock", ascending=False)
-                if not high_pv.empty:
-                    st.dataframe(high_pv[['SKU', 'Full Name', 'Stock']], use_container_width=True, hide_index=True)
-                else:
-                    st.write("No items over 50 in PV.")
-        else:
-            st.info("Please upload inventory files in the sidebar to perform comparison.")
+            st.header("🔄 Stock Comparison ")
+    
+            if not master_inventory.empty:
+                # --- PART A: SIDE-BY-SIDE COMPARISON ---
+                st.subheader("Location Comparison (CV vs PV)")
+                
+                # Split the master inventory into two dataframes
+                df_cv = master_inventory[master_inventory['Location'] == "Canape-Vert"][['SKU', 'Full Name', 'Stock', 'Category']]
+                df_pv = master_inventory[master_inventory['Location'] == "Pv"][['SKU', 'Full Name', 'Stock']]
+                
+                # Merge on SKU to show them side-by-side. 
+                # How='outer' ensures that if a SKU is in CV but not PV (or vice versa), it still shows.
+                comparison_df = pd.merge(
+                    df_cv, 
+                    df_pv, 
+                    on="SKU", 
+                    how="outer", 
+                    suffixes=('_CV', '_PV')
+                )
+                
+                # Clean up the merged data
+                comparison_df['Full Name_CV'] = comparison_df['Full Name_CV'].fillna(comparison_df['Full Name_PV'])
+                comparison_df['Stock_CV'] = comparison_df['Stock_CV'].fillna(0).astype(int)
+                comparison_df['Stock_PV'] = comparison_df['Stock_PV'].fillna(0).astype(int)
+                
+                # Formatting for display
+                display_comp = comparison_df[['SKU', 'Full Name_CV', 'Stock_CV', 'Stock_PV']].rename(columns={
+                    'Full Name_CV': 'Wig Name',
+                    'Stock_CV': 'Qty (Canape-Vert)',
+                    'Stock_PV': 'Qty (PV)'
+                })
+    
+                # Search within comparison
+                comp_search = st.text_input("🔍 Search Comparison", placeholder="Filter by Name or SKU...").lower()
+                if comp_search:
+                    display_comp = search_inventory(display_comp.rename(columns={'Wig Name':'Full Name'}), comp_search)
+    
+                st.dataframe(display_comp, use_container_width=True, hide_index=True)
+    
+                st.divider()
+    
+                # --- PART B: OVER 50 STOCK CHECK ---
+                st.subheader("🔥 High Stock Alert (Over 50 Units)")
+                col_high1, col_high2 = st.columns(2)
+    
+                with col_high1:
+                    st.markdown("##### 📍 Canape-Vert (> 50)")
+                    high_cv = df_cv[df_cv['Stock'] > 50].sort_values(by="Stock", ascending=False)
+                    if not high_cv.empty:
+                        st.dataframe(high_cv[['SKU', 'Full Name', 'Stock']], use_container_width=True, hide_index=True)
+                    else:
+                        st.write("No items over 50 in Canape-Vert.")
+    
+                with col_high2:
+                    st.markdown("##### 📍 PV (> 50)")
+                    high_pv = df_pv[df_pv['Stock'] > 50].sort_values(by="Stock", ascending=False)
+                    if not high_pv.empty:
+                        st.dataframe(high_pv[['SKU', 'Full Name', 'Stock']], use_container_width=True, hide_index=True)
+                    else:
+                        st.write("No items over 50 in PV.")
+            else:
+                st.info("Please upload inventory files in the sidebar to perform comparison.")
 
     # --- 7. SALES (FAST/SLOW MOVERS) ---
     if "Sales" in tab_dict: 
         with tab_dict["Sales"]:
-        st.header("💰 Sales Analysis ")
-        
-        # 1. Upload Old Export
-        old_file = st.file_uploader("Upload Old Square Export (Excel)", type=['xlsx'], key="sales_old_file")
-
-        if old_file and not master_inventory.empty:
-            try:
-                df_old = pd.read_excel(old_file, skiprows=1)
-                df_old.columns = [str(c).strip() for c in df_old.columns]
-                
-                token_col = 'Token' if 'Token' in df_old.columns else None
-                old_qty_col = "Current Quantity Dressupht Pv" 
-
-                if not token_col:
-                    st.error("Token column missing in uploaded file.")
-                else:
-                    df_current_pv = master_inventory[master_inventory['Location'] == "Pv"].copy()
-                    
-                    # Merge on Token
-                    sales_comp = pd.merge(
-                        df_old[[token_col, old_qty_col]], 
-                        df_current_pv, 
-                        on=token_col, 
-                        how='inner',
-                        suffixes=('_old', '_current')
-                    )
-
-                    # Calculate Actual Sales (Movement)
-                    sales_comp['Sales'] = pd.to_numeric(sales_comp[old_qty_col], errors='coerce').fillna(0) - sales_comp['Stock']
-                    
-                    # --- A. FULL SALES VIEW ---
-                    st.subheader("📊 All Sales Movement")
-                    full_view = sales_comp[sales_comp['Sales'] != 0].copy()
-                    st.dataframe(
-                        full_view[['Full Name', 'SKU', 'Sales', 'Stock']].rename(columns={'Stock': 'Remaining'}),
-                        use_container_width=True, 
-                        hide_index=True
-                    )
-
-                    st.divider()
-
-                    # --- B. TOP 10 RANKINGS ---
-                    col_s1, col_s2 = st.columns(2)
-                    
-                    with col_s1:
-                        st.subheader("🚀 Top 10 Fast Movers")
-                        # Highest sales count first
-                        fast_10 = sales_comp[sales_comp['Sales'] > 0].sort_values(by='Sales', ascending=False).head(10)
-                        if not fast_10.empty:
-                            st.dataframe(fast_10[['Full Name', 'Sales']], use_container_width=True, hide_index=True)
-                        else:
-                            st.write("No sales recorded.")
-
-                    with col_s2:
-                        st.subheader("🐢 Top 10 Slow Movers")
-                        # Items with 0 or negative sales (returns), showing highest stock sitting idle
-                        slow_10 = sales_comp[sales_comp['Sales'] <= 0].sort_values(by='Stock', ascending=False).head(10)
-                        if not slow_10.empty:
-                            st.dataframe(slow_10[['Full Name', 'Stock']], use_container_width=True, hide_index=True)
-                        else:
-                            st.write("Everything is moving!")
+            st.header("💰 Sales Analysis ")
             
-            except Exception as e:
-                st.error(f"Error processing sales data: {e}")
-        else:
-            st.info("Upload an older Square export to calculate sales movement against current PV stock.")
+            # 1. Upload Old Export
+            old_file = st.file_uploader("Upload Old Square Export (Excel)", type=['xlsx'], key="sales_old_file")
+    
+            if old_file and not master_inventory.empty:
+                try:
+                    df_old = pd.read_excel(old_file, skiprows=1)
+                    df_old.columns = [str(c).strip() for c in df_old.columns]
+                    
+                    token_col = 'Token' if 'Token' in df_old.columns else None
+                    old_qty_col = "Current Quantity Dressupht Pv" 
+    
+                    if not token_col:
+                        st.error("Token column missing in uploaded file.")
+                    else:
+                        df_current_pv = master_inventory[master_inventory['Location'] == "Pv"].copy()
+                        
+                        # Merge on Token
+                        sales_comp = pd.merge(
+                            df_old[[token_col, old_qty_col]], 
+                            df_current_pv, 
+                            on=token_col, 
+                            how='inner',
+                            suffixes=('_old', '_current')
+                        )
+    
+                        # Calculate Actual Sales (Movement)
+                        sales_comp['Sales'] = pd.to_numeric(sales_comp[old_qty_col], errors='coerce').fillna(0) - sales_comp['Stock']
+                        
+                        # --- A. FULL SALES VIEW ---
+                        st.subheader("📊 All Sales Movement")
+                        full_view = sales_comp[sales_comp['Sales'] != 0].copy()
+                        st.dataframe(
+                            full_view[['Full Name', 'SKU', 'Sales', 'Stock']].rename(columns={'Stock': 'Remaining'}),
+                            use_container_width=True, 
+                            hide_index=True
+                        )
+    
+                        st.divider()
+    
+                        # --- B. TOP 10 RANKINGS ---
+                        col_s1, col_s2 = st.columns(2)
+                        
+                        with col_s1:
+                            st.subheader("🚀 Top 10 Fast Movers")
+                            # Highest sales count first
+                            fast_10 = sales_comp[sales_comp['Sales'] > 0].sort_values(by='Sales', ascending=False).head(10)
+                            if not fast_10.empty:
+                                st.dataframe(fast_10[['Full Name', 'Sales']], use_container_width=True, hide_index=True)
+                            else:
+                                st.write("No sales recorded.")
+    
+                        with col_s2:
+                            st.subheader("🐢 Top 10 Slow Movers")
+                            # Items with 0 or negative sales (returns), showing highest stock sitting idle
+                            slow_10 = sales_comp[sales_comp['Sales'] <= 0].sort_values(by='Stock', ascending=False).head(10)
+                            if not slow_10.empty:
+                                st.dataframe(slow_10[['Full Name', 'Stock']], use_container_width=True, hide_index=True)
+                            else:
+                                st.write("Everything is moving!")
+                
+                except Exception as e:
+                    st.error(f"Error processing sales data: {e}")
+            else:
+                st.info("Upload an older Square export to calculate sales movement against current PV stock.")
 
     # --- 8. ADMIN TAB ---
     if "Admin" in tab_dict: 
         with tab_dict["Admin"]:
-        st.header("⚙️ Admin Control ")
-        
-        # Restriction: Strictly Admin Only
-        if role != "Admin":
-            st.error("🚫 Access Denied. This section is restricted to System Administrators.")
-        else:
-            admin_subtab = st.tabs(["👤 User Management", "📜 Global Activity Log", "🧹 Database Maintenance"])
-
-            # --- SUB-TAB 1: USER MANAGEMENT ---
-            with admin_subtab[0]:
-                st.subheader("Manage Team Roles & Locations")
-                try:
-                    # Fetching from 'Role' table with your exact columns
-                    users_query = supabase.table("Role").select("*").execute()
-                    users_df = pd.DataFrame(users_query.data)
+            st.header("⚙️ Admin Control ")
+            
+            # Restriction: Strictly Admin Only
+            if role != "Admin":
+                st.error("🚫 Access Denied. This section is restricted to System Administrators.")
+            else:
+                admin_subtab = st.tabs(["👤 User Management", "📜 Global Activity Log", "🧹 Database Maintenance"])
+    
+                # --- SUB-TAB 1: USER MANAGEMENT ---
+                with admin_subtab[0]:
+                    st.subheader("Manage Team Roles & Locations")
+                    try:
+                        # Fetching from 'Role' table with your exact columns
+                        users_query = supabase.table("Role").select("*").execute()
+                        users_df = pd.DataFrame(users_query.data)
+                        
+                        if not users_df.empty:
+                            # Displaying your specific columns
+                            st.dataframe(
+                                users_df[['User Name', 'Roles', 'Email', 'Location']], 
+                                use_container_width=True, 
+                                hide_index=True
+                            )
+                            
+                            st.divider()
+                            
+                            col_up1, col_up2 = st.columns(2)
+                            with col_up1:
+                                st.markdown("##### 🔐 Update Permissions")
+                                with st.form("role_update_form"):
+                                    target_user = st.selectbox("Select User", users_df['User Name'].unique())
+                                    new_role = st.selectbox("Assign New Role", ["Admin", "Manager", "Staff"])
+                                    if st.form_submit_button("Update Role"):
+                                        supabase.table("Role").update({"Roles": new_role}).eq("User Name", target_user).execute()
+                                        st.success(f"Updated {target_user} to {new_role}")
+                                        time.sleep(1)
+                                        st.rerun()
+                            
+                            with col_up2:
+                                st.markdown("##### 📍 Update Staff Location")
+                                with st.form("loc_update_form"):
+                                    target_user_loc = st.selectbox("Select User", users_df['User Name'].unique())
+                                    new_loc = st.selectbox("Assign Location", ["Pv", "Canape-Vert", "Both"])
+                                    if st.form_submit_button("Update Location"):
+                                        supabase.table("Role").update({"Location": new_loc}).eq("User Name", target_user_loc).execute()
+                                        st.success(f"Relocated {target_user_loc} to {new_loc}")
+                                        time.sleep(1)
+                                        st.rerun()
+                        else:
+                            st.warning("The Role table is currently empty.")
+                    except Exception as e:
+                        st.error(f"Could not load user table: {e}")
+    
+                # --- SUB-TAB 2: GLOBAL ACTIVITY LOG ---
+                with admin_subtab[1]:
+                    st.subheader("Recent System-Wide Actions")
+                    log_choice = st.radio("View Logs From:", ["Arrivals", "Inventory Audits", "Depot Movements", "Mannequin Display"], horizontal=True)
                     
-                    if not users_df.empty:
-                        # Displaying your specific columns
-                        st.dataframe(
-                            users_df[['User Name', 'Roles', 'Email', 'Location']], 
-                            use_container_width=True, 
-                            hide_index=True
+                    # Mapping the selection to your exact Supabase table names
+                    table_map = {
+                        "Arrivals": "Arrival",
+                        "Inventory Audits": "Inventory",
+                        "Depot Movements": "Depot",
+                        "Mannequin Display": "Mannequin"
+                    }
+                    
+                    try:
+                        # Fetch the last 50 actions from the selected table
+                        logs = supabase.table(table_map[log_choice]).select("*").execute()
+                        if logs.data:
+                            logs_df = pd.DataFrame(logs.data)
+                            
+                            # Apply a sort if a date column exists
+                            date_cols = ['Date', 'Last_Updated', 'created_at']
+                            found_date = next((c for c in date_cols if c in logs_df.columns), None)
+                            if found_date:
+                                logs_df = logs_df.sort_values(by=found_date, ascending=False)
+                            
+                            st.dataframe(logs_df, use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"No records found in the {log_choice} table.")
+                    except Exception as e:
+                        st.error(f"Error fetching logs: {e}")
+    
+                # --- SUB-TAB 3: DATABASE MAINTENANCE ---
+                with admin_subtab[2]:
+                    st.subheader("Data Management")
+                    st.warning("⚠️ These tools allow you to export or manage bulk data.")
+                    
+                    col_maint1, col_maint2 = st.columns(2)
+                    
+                    with col_maint1:
+                        st.write("### Export Data")
+                        csv = master_inventory.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download Master Inventory (CSV)",
+                            data=csv,
+                            file_name=f"Master_Inventory_{date.today()}.csv",
+                            mime='text/csv',
                         )
-                        
-                        st.divider()
-                        
-                        col_up1, col_up2 = st.columns(2)
-                        with col_up1:
-                            st.markdown("##### 🔐 Update Permissions")
-                            with st.form("role_update_form"):
-                                target_user = st.selectbox("Select User", users_df['User Name'].unique())
-                                new_role = st.selectbox("Assign New Role", ["Admin", "Manager", "Staff"])
-                                if st.form_submit_button("Update Role"):
-                                    supabase.table("Role").update({"Roles": new_role}).eq("User Name", target_user).execute()
-                                    st.success(f"Updated {target_user} to {new_role}")
-                                    time.sleep(1)
-                                    st.rerun()
-                        
-                        with col_up2:
-                            st.markdown("##### 📍 Update Staff Location")
-                            with st.form("loc_update_form"):
-                                target_user_loc = st.selectbox("Select User", users_df['User Name'].unique())
-                                new_loc = st.selectbox("Assign Location", ["Pv", "Canape-Vert", "Both"])
-                                if st.form_submit_button("Update Location"):
-                                    supabase.table("Role").update({"Location": new_loc}).eq("User Name", target_user_loc).execute()
-                                    st.success(f"Relocated {target_user_loc} to {new_loc}")
-                                    time.sleep(1)
-                                    st.rerun()
-                    else:
-                        st.warning("The Role table is currently empty.")
-                except Exception as e:
-                    st.error(f"Could not load user table: {e}")
-
-            # --- SUB-TAB 2: GLOBAL ACTIVITY LOG ---
-            with admin_subtab[1]:
-                st.subheader("Recent System-Wide Actions")
-                log_choice = st.radio("View Logs From:", ["Arrivals", "Inventory Audits", "Depot Movements", "Mannequin Display"], horizontal=True)
-                
-                # Mapping the selection to your exact Supabase table names
-                table_map = {
-                    "Arrivals": "Arrival",
-                    "Inventory Audits": "Inventory",
-                    "Depot Movements": "Depot",
-                    "Mannequin Display": "Mannequin"
-                }
-                
-                try:
-                    # Fetch the last 50 actions from the selected table
-                    logs = supabase.table(table_map[log_choice]).select("*").execute()
-                    if logs.data:
-                        logs_df = pd.DataFrame(logs.data)
-                        
-                        # Apply a sort if a date column exists
-                        date_cols = ['Date', 'Last_Updated', 'created_at']
-                        found_date = next((c for c in date_cols if c in logs_df.columns), None)
-                        if found_date:
-                            logs_df = logs_df.sort_values(by=found_date, ascending=False)
-                        
-                        st.dataframe(logs_df, use_container_width=True, hide_index=True)
-                    else:
-                        st.info(f"No records found in the {log_choice} table.")
-                except Exception as e:
-                    st.error(f"Error fetching logs: {e}")
-
-            # --- SUB-TAB 3: DATABASE MAINTENANCE ---
-            with admin_subtab[2]:
-                st.subheader("Data Management")
-                st.warning("⚠️ These tools allow you to export or manage bulk data.")
-                
-                col_maint1, col_maint2 = st.columns(2)
-                
-                with col_maint1:
-                    st.write("### Export Data")
-                    csv = master_inventory.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Download Master Inventory (CSV)",
-                        data=csv,
-                        file_name=f"Master_Inventory_{date.today()}.csv",
-                        mime='text/csv',
-                    )
-                
-                with col_maint2:
-                    st.write("### System Status")
-                    total_items = len(master_inventory)
-                    st.metric("Total Items in System", total_items)
-                    st.info("To clear or reset database tables, please use the Supabase SQL Editor for safety.")
+                    
+                    with col_maint2:
+                        st.write("### System Status")
+                        total_items = len(master_inventory)
+                        st.metric("Total Items in System", total_items)
+                        st.info("To clear or reset database tables, please use the Supabase SQL Editor for safety.")
 
     # --- 9. PASSWORD TAB ---
     if "Password" in tab_dict: 
         with tab_dict["Password"]:
-        st.header("🔑 Password Management")
-        # Pre-integrated reset from the library
-        authenticator.reset_password(username=username)
+            st.header("🔑 Password Management")
+            # Pre-integrated reset from the library
+            authenticator.reset_password(username=username)
 
 elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
-
-
-
-
-
-
-
-
-
-
-
 
 
 
