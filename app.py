@@ -30,45 +30,48 @@ def clean_and_combine(file_cv, file_pv):
     def process_file(file, loc_name):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip() for c in df.columns]
-        
-        # We ADDED 'Token' to the mapping here
+
+        # Column mapping
         mapping = {
-            'Item Name': 'Full Name', 
-            'SKU': 'SKU', 
-            'Categories': 'Category', 
+            'Item Name': 'Full Name',
+            'SKU': 'SKU',
+            'Categories': 'Category',
             'Price': 'Price',
-            'Token': 'Token' # <--- This matches the column name in Square Excel
+            'Token': 'Token'  # Matches the column name in Square Excel
         }
         df = df.rename(columns=mapping)
-        
+
+        # Stock column depends on location
         stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
-        
-        # Ensure the column exists in the Excel, if not, create an empty one so it doesn't crash
+
+        # Ensure Token column exists
         if 'Token' not in df.columns:
             df['Token'] = "NO_TOKEN"
 
+        # Clean and normalize fields
         df['Stock'] = pd.to_numeric(df[stock_col], errors='coerce').fillna(0).astype(int) if stock_col in df.columns else 0
         df['SKU'] = df['SKU'].astype(str).str.strip().replace(['nan', ''], 'NO_SKU')
         df['Category'] = df['Category'].fillna("Uncategorized").astype(str)
         df['Location'] = loc_name
         df['Price'] = pd.to_numeric(df.get('Price', 0), errors='coerce').fillna(0.0)
-        
-        # Include 'Token' in the return list
+
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location', 'Token']].copy()
 
     df1 = process_file(file_cv, "Canape-Vert")
     df2 = process_file(file_pv, "Pv")
     return pd.concat([df1, df2], ignore_index=True)
 
-    def search_inventory(df, query):
-        tokens = query.lower().split()
-        result = df.copy()
-        for t in tokens:
-            result = result[
-                result['Full Name'].str.lower().str.contains(t) |
-                result['SKU'].str.lower().str.startswith(t)
-            ]
-        return result
+
+# --- Helper function for searches ---
+def search_inventory(df, query):
+    tokens = query.lower().split()
+    result = df.copy()
+    for t in tokens:
+        result = result[
+            result['Full Name'].str.lower().str.contains(t) |
+            result['SKU'].str.lower().str.startswith(t)
+        ]
+    return result
 
 # --- 4. AUTHENTICATION ---
 usernames_list = ["djessie", "kevin", "casimir", "melchisedek", "david", "darius", "eliada", "sebastien", "guirlene", "carmela", "angelina", "tamara", "dorotheline", "sarah", "valerie", "saouda", "marie france", "carelle", "annaelle", "gerdine", "martilda"]
@@ -786,6 +789,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
