@@ -131,13 +131,12 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
                         })
     return pd.DataFrame(rows)
 
-    def clean_and_combine(file_cv, file_pv):
-    # This function must be indented to stay inside clean_and_combine
+def clean_and_combine(file_cv, file_pv):
     def process_file(file, loc_name):
         df = pd.read_excel(file, skiprows=1)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # We use 'Category' here to match your Square export column
+        # Mapping Excel columns to App columns
         mapping = {
             'Item Name': 'Full Name', 
             'SKU': 'SKU', 
@@ -147,6 +146,7 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
         }
         df = df.rename(columns=mapping)
         
+        # Logic for Stock columns
         stock_col = "Current Quantity Dressup Haiti" if loc_name == "Canape-Vert" else "Current Quantity Dressupht Pv"
         
         if 'Token' not in df.columns:
@@ -164,7 +164,7 @@ def process_square_json(catalog_objects, inventory_counts, locations_map):
         
         return df[['SKU', 'Full Name', 'Stock', 'Price', 'Category', 'Location', 'Token']].copy()
 
-    # Now we call the internal function for both files
+    # Call the nested function
     df1 = process_file(file_cv, "Canape-Vert")
     df2 = process_file(file_pv, "Pv")
     return pd.concat([df1, df2], ignore_index=True)
@@ -546,6 +546,7 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
 
