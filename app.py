@@ -145,11 +145,7 @@ if authentication_status:
 
             # Tokenized Search
             if search_query:
-                for token in search_query.split():
-                    disp_df = disp_df[
-                        disp_df['Full Name'].str.lower().str.contains(token) | 
-                        disp_df['SKU'].str.lower().str.contains(token)
-                    ]
+                disp_df = search_inventory(disp_df, search_query)
 
             # Sorting
             sort_map = {
@@ -275,7 +271,7 @@ if authentication_status:
                 tokens = search_input.split()
                 match = pv_master.copy()
                 for t in tokens:
-                    match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
+                    match = search_inventory(pv_master, search_input)
                 
                 if not match.empty:
                     selected_item = match.iloc[0]
@@ -408,7 +404,7 @@ if authentication_status:
             tokens = m_search.split()
             match = master_inventory.copy()
             for t in tokens:
-                match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
+                match = search_inventory(master_inventory, m_search)
             
             if not match.empty:
                 m_item = match.iloc[0]
@@ -494,10 +490,7 @@ if authentication_status:
                 tokens = d_search.split()
                 match = master_inventory.copy()
                 for t in tokens:
-                    match = match[
-                        match['Full Name'].str.lower().str.contains(t) |
-                        match['SKU'].str.lower().str.startswith(t)   # <-- updated logic
-                    ]
+                    match = search_inventory(master_inventory, d_search)
             
                 if not match.empty:
                     # Let user choose from multiple matches
@@ -576,11 +569,8 @@ if authentication_status:
 
             # Search within comparison
             comp_search = st.text_input("🔍 Search Comparison", placeholder="Filter by Name or SKU...").lower()
-            if comp_search:
-                display_comp = display_comp[
-                    display_comp['Wig Name'].str.lower().str.contains(comp_search) | 
-                    display_comp['SKU'].str.lower().str.contains(comp_search)
-                ]
+           if comp_search:
+                display_comp = search_inventory(display_comp.rename(columns={'Wig Name':'Full Name'}), comp_search)
 
             st.dataframe(display_comp, use_container_width=True, hide_index=True)
 
@@ -796,5 +786,6 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
