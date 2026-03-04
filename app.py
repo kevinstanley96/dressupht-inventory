@@ -477,18 +477,22 @@ if authentication_status:
         col_d1, col_d2 = st.columns([2, 1])
 
         with col_d1:
+            # --- DEPOT TAB SEARCH BLOCK (Rewritten) ---
             d_search = st.text_input("🔍 Search Item for Depot", placeholder="Search by SKU or Name...", key="dep_search").lower()
             
             if d_search:
                 tokens = d_search.split()
                 match = master_inventory.copy()
                 for t in tokens:
-                    match = match[match['Full Name'].str.lower().str.contains(t) | match['SKU'].str.lower().str.contains(t)]
-                
+                    match = match[
+                        match['Full Name'].str.lower().str.contains(t) |
+                        match['SKU'].str.lower().str.startswith(t)   # <-- updated logic
+                    ]
+            
                 if not match.empty:
                     d_item = match.iloc[0]
                     st.success(f"Selected: **{d_item['Full Name']}**")
-                    
+            
                     # Calculate Current Net Stock in Depot for this SKU
                     if not d_df.empty:
                         sku_df = d_df[d_df['SKU'] == d_item['SKU']]
@@ -496,12 +500,12 @@ if authentication_status:
                         subs = sku_df[sku_df['Type'] == "Withdrawal"]['Quantity'].sum()
                         net_depot = adds - subs
                         st.metric("Current Net in Depot", f"{int(net_depot)} units")
-
+            
                     with st.form("depot_form", clear_on_submit=True):
                         d_type = st.radio("Movement Type", ["Addition", "Withdrawal"], horizontal=True)
                         d_qty = st.number_input("Quantity", min_value=1, step=1)
                         d_date = st.date_input("Date", value=date.today())
-                        
+            
                         if st.form_submit_button("Confirm Depot Entry"):
                             dep_entry = {
                                 "Date": str(d_date),
@@ -511,7 +515,7 @@ if authentication_status:
                                 "Quantity": int(d_qty),
                                 "User": str(username)
                             }
-                            
+            
                             supabase.table("Depot").insert(dep_entry).execute()
                             st.success(f"Recorded {d_type} for {d_item['Full Name']}")
                             time.sleep(1)
@@ -775,3 +779,4 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
