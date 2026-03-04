@@ -339,13 +339,22 @@ if authentication_status:
             st.dataframe(d_df.head(10)[['Date', 'Wig Name', 'Type', 'Quantity', 'User']], use_container_width=True, hide_index=True)
         
         st.divider()
-        d_search = st.text_input("🔍 Depot Search").lower()
+        d_search = st.text_input("🔍 Depot Search", key="depot_search_box").lower()
+        
         if d_search:
             # Use .str.contains() correctly and search both Name and SKU
-            name_match = master_inventory['Full Name'].str.lower().str.contains(d_search.lower(), na=False)
-            sku_match = master_inventory['SKU'].str.lower().str.contains(d_search.lower(), na=False)
-    
-        match = master_inventory[name_match | sku_match]
+            name_match = master_inventory['Full Name'].str.lower().str.contains(d_search, na=False)
+            sku_match = master_inventory['SKU'].str.lower().str.contains(d_search, na=False)
+            
+            # This line MUST be indented inside the 'if d_search:' block
+            match = master_inventory[name_match | sku_match]
+            
+            if not match.empty:
+                # Per your request: Default sort by name
+                match = match.sort_values(by="Full Name")
+                st.dataframe(match[['Full Name', 'SKU', 'Location', 'Stock']], use_container_width=True)
+            else:
+                st.warning("No items found.")
         else:
             match = pd.DataFrame()
 
@@ -544,4 +553,5 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
