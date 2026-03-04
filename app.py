@@ -72,7 +72,8 @@ def clean_and_combine(file_cv, file_pv):
     df2 = process_file(file_pv, "Pv")
     return pd.concat([df1, df2], ignore_index=True)
 
-# --- NEW SQUARE API FUNCTIONS ---
+# --- 3. HELPER FUNCTIONS (Continued) ---
+
 SQUARE_API_URL = "https://connect.squareup.com/v2"
 HEADERS = {
     "Square-Version": "2024-01-17", 
@@ -81,27 +82,19 @@ HEADERS = {
 }
 
 def process_square_json(catalog_json, inventory_json, locations_map):
-    # 1. Map Category IDs to Names
-    categories = {}
-    for obj in catalog_json.get('objects', []):
-        if obj['type'] == 'CATEGORY':
-            categories[obj['id']] = obj.get('category_data', {}).get('name', 'Uncategorized')
+    categories = {obj['id']: obj.get('category_data', {}).get('name', 'Uncategorized') 
+                  for obj in catalog_json.get('objects', []) if obj['type'] == 'CATEGORY'}
 
-    # 2. Map Inventory Counts
-    counts = {}
-    for entry in inventory_json.get('counts', []):
-        key = (entry.get('catalog_object_id'), entry.get('location_id'))
-        qty = int(float(entry.get('quantity', 0)))
-        counts[key] = counts.get(key, 0) + qty
+    counts = {(entry.get('catalog_object_id'), entry.get('location_id')): int(float(entry.get('quantity', 0))) 
+              for entry in inventory_json.get('counts', [])}
 
-    rows = []
-    # 3. Map Locations (Using your specific Square Names)
-    # Square Name : Your App's Internal Name
+    # Map Square's names to your internal App names
     target_locs = {
         "Dressup Haiti": "Canape-Vert",
         "Dressup Pv": "Pv"
     }
 
+    rows = []
     for obj in catalog_json.get('objects', []):
         if obj['type'] == 'ITEM':
             item_name = obj.get('item_data', {}).get('name', 'Unknown')
@@ -114,20 +107,28 @@ def process_square_json(catalog_json, inventory_json, locations_map):
                 price_data = var.get('item_variation_data', {}).get('price_money', {})
                 price = price_data.get('amount', 0) / 100
 
-                # Match Square's Location Name to your App's Location Name
                 for square_name, app_name in target_locs.items():
                     loc_id = locations_map.get(square_name)
                     if loc_id:
                         rows.append({
-                            'SKU': sku,
-                            'Full Name': item_name,
-                            'Stock': counts.get((var_id, loc_id), 0),
-                            'Price': price,
-                            'Category': cat_name, # Standardized singular name
-                            'Location': app_name, # Standardized app name
-                            'Token': var_id
+                            'SKU': sku, 'Full Name': item_name, 'Stock': counts.get((var_id, loc_id), 0),
+                            'Price': price, 'Category': cat_name, 'Location': app_name, 'Token': var_id
                         })
     return pd.DataFrame(rows)
+
+def fetch_square_data():
+    try:
+        loc_res = requests.get(f"{SQUARE_API_URL}/locations", headers=HEADERS).json()
+        # Create a map of {Name: ID}
+        locations = {l['name']: l['id'] for l in loc_res.get('locations', [])}
+        
+        cat_res = requests.get(f"{SQUARE_API_URL}/catalog/list?types=ITEM,CATEGORY", headers=HEADERS).json()
+        inv_res = requests.get(f"{SQUARE_API_URL}/inventory/counts", headers=HEADERS).json()
+        
+        return process_square_json(cat_res, inv_res, locations)
+    except Exception as e:
+        st.error(f"API Error: {e}")
+        return pd.DataFrame()
 
 # --- 4. AUTHENTICATION ---
 usernames_list = ["djessie", "kevin", "casimir", "melchisedek", "david", "darius", "eliada", "sebastien", "guirlene", "carmela", "angelina", "tamara", "dorotheline", "sarah", "valerie", "saouda", "marie france", "carelle", "annaelle", "gerdine", "martilda"]
@@ -549,5 +550,6 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
