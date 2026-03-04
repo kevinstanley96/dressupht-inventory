@@ -60,6 +60,16 @@ def clean_and_combine(file_cv, file_pv):
     df2 = process_file(file_pv, "Pv")
     return pd.concat([df1, df2], ignore_index=True)
 
+    def search_inventory(df, query):
+    tokens = query.lower().split()
+    result = df.copy()
+    for t in tokens:
+        result = result[
+            result['Full Name'].str.lower().str.contains(t) |
+            result['SKU'].str.lower().str.startswith(t)
+        ]
+    return result
+
 # --- 4. AUTHENTICATION ---
 usernames_list = ["djessie", "kevin", "casimir", "melchisedek", "david", "darius", "eliada", "sebastien", "guirlene", "carmela", "angelina", "tamara", "dorotheline", "sarah", "valerie", "saouda", "marie france", "carelle", "annaelle", "gerdine", "martilda"]
 credentials = {"usernames": {u: {"name": u, "password": "temppassword123"} for u in usernames_list}}
@@ -786,3 +796,4 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
