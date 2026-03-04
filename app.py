@@ -81,21 +81,28 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-def process_square_json(catalog_json, inventory_json, locations_map):
+def process_square_json(catalog_objects, inventory_counts, locations_map):
+    # Map Category IDs to human-readable names
     categories = {obj['id']: obj.get('category_data', {}).get('name', 'Uncategorized') 
-                  for obj in catalog_json.get('objects', []) if obj['type'] == 'CATEGORY'}
+                  for obj in catalog_objects if obj['type'] == 'CATEGORY'}
 
-    counts = {(entry.get('catalog_object_id'), entry.get('location_id')): int(float(entry.get('quantity', 0))) 
-              for entry in inventory_json.get('counts', [])}
+    # Map Inventory: {(Variation_ID, Location_ID): Quantity}
+    counts = {}
+    for entry in inventory_counts:
+        v_id = entry.get('catalog_object_id')
+        l_id = entry.get('location_id')
+        qty = int(float(entry.get('quantity', 0)))
+        counts[(v_id, l_id)] = qty
 
-    # Map Square's names to your internal App names
+    # --- THE CRITICAL MAPPING ---
+    # "Square Dashboard Name": "Your App's Internal Name"
     target_locs = {
         "Dressup Haiti": "Canape-Vert",
-        "Dressup Pv": "Pv"
+        "Dressupht Pv": "Pv"  # Updated name here
     }
 
     rows = []
-    for obj in catalog_json.get('objects', []):
+    for obj in catalog_objects:
         if obj['type'] == 'ITEM':
             item_name = obj.get('item_data', {}).get('name', 'Unknown')
             cat_id = obj.get('item_data', {}).get('category_id')
@@ -104,48 +111,61 @@ def process_square_json(catalog_json, inventory_json, locations_map):
             for var in obj.get('item_data', {}).get('variations', []):
                 var_id = var['id']
                 sku = var.get('item_variation_data', {}).get('sku', 'NO_SKU')
-                price_data = var.get('item_variation_data', {}).get('price_money', {})
-                price = price_data.get('amount', 0) / 100
+                price = var.get('item_variation_data', {}).get('price_money', {}).get('amount', 0) / 100
 
+                # Process both locations for every single variation
                 for square_name, app_name in target_locs.items():
                     loc_id = locations_map.get(square_name)
+                    
                     if loc_id:
+                        # Grab the specific stock count for this item + this location
+                        stock_val = counts.get((var_id, loc_id), 0)
+                        
                         rows.append({
-                            'SKU': sku, 'Full Name': item_name, 'Stock': counts.get((var_id, loc_id), 0),
-                            'Price': price, 'Category': cat_name, 'Location': app_name, 'Token': var_id
+                            'SKU': sku,
+                            'Full Name': item_name,
+                            'Stock': stock_val,
+                            'Price': price,
+                            'Category': cat_name,
+                            'Location': app_name,
+                            'Token': var_id
                         })
+    
     return pd.DataFrame(rows)
 
 def fetch_square_data():
     try:
-        # 1. Get Locations
+        # 1. Get Locations and map them accurately
         loc_res = requests.get(f"{SQUARE_API_URL}/locations", headers=HEADERS).json()
-        locations = {l['name']: l['id'] for l in loc_res.get('locations', [])}
+        # strip() ensures we handle names robustly
+        locations_dict = {l['name'].strip(): l['id'] for l in loc_res.get('locations', [])}
         
-        # 2. Fetch Catalog with Pagination (The fix for the 100-line limit)
+        # 2. Fetch Catalog (With Pagination)
         all_catalog_objects = []
         cursor = None
-        
         while True:
             url = f"{SQUARE_API_URL}/catalog/list?types=ITEM,CATEGORY"
-            if cursor:
-                url += f"&cursor={cursor}"
-            
+            if cursor: url += f"&cursor={cursor}"
             res = requests.get(url, headers=HEADERS).json()
             all_catalog_objects.extend(res.get('objects', []))
-            
             cursor = res.get('cursor')
-            if not cursor:
-                break
+            if not cursor: break
         
-        # 3. Fetch Inventory (Square usually gives all counts, but we can paginate if needed)
-        # Note: inventory/counts also supports cursors, but catalog is usually the bottleneck
-        inv_res = requests.get(f"{SQUARE_API_URL}/inventory/counts", headers=HEADERS).json()
-        
-        # Create a mock catalog structure for our existing process function
-        full_catalog_json = {"objects": all_catalog_objects}
-        
-        return process_square_json(full_catalog_json, inv_res, locations)
+        # 3. Fetch Inventory (With Pagination - Crucial for large inventories)
+        all_inventory_counts = []
+        inv_cursor = None
+        while True:
+            # Note: Pagination for inventory uses a slightly different URL param
+            inv_url = f"{SQUARE_API_URL}/inventory/counts"
+            if inv_cursor: 
+                inv_url = f"{SQUARE_API_URL}/inventory/counts?cursor={inv_cursor}"
+            
+            inv_res = requests.get(inv_url, headers=HEADERS).json()
+            all_inventory_counts.extend(inv_res.get('counts', []))
+            inv_cursor = inv_res.get('cursor')
+            if not inv_cursor: break
+
+        return process_square_json(all_catalog_objects, all_inventory_counts, locations_dict)
 
     except Exception as e:
         st.error(f"API Error: {e}")
@@ -571,6 +591,7 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
+
 
 
 
