@@ -261,15 +261,15 @@ if authentication_status:
                         st.error("Could not load arrival logs.")
 
     # --- 3. INVENTORY (AUDIT) TAB ---
-    def sanitize_sheet_name(name: str) -> str:
-        # Remove invalid characters for Excel sheet names
-        cleaned = re.sub(r'[\/\\\?\*
-    
-    \[\]
-    
-    :]', '_', str(name))
-        # Truncate to 31 chars (Excel limit)
-        return cleaned[:31]
+   def sanitize_sheet_name(name: str) -> str:
+    # Remove invalid characters for Excel sheet names
+    cleaned = re.sub(r'[\/\\\?\*
+
+\[\]
+
+:]', '_', str(name))
+    # Truncate to 31 chars (Excel limit)
+    return cleaned[:31]
     
     if "Inventory" in tab_dict: 
         with tab_dict["Inventory"]:
@@ -776,6 +776,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
