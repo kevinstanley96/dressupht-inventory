@@ -440,9 +440,11 @@ if authentication_status:
             d_df = pd.DataFrame()
 
         # 2. DISPLAY LOG (AT THE TOP)
-        st.subheader("Recent Depot Activity")
+        # --- DEPOT TAB FULL HISTORY DISPLAY ---
+        st.subheader("Depot Activity History")
+        
         if not d_df.empty:
-            # We display the last 10 activities with a delete option
+            # Show all entries with delete option
             h1, h2, h3, h4, h5, h6 = st.columns([1, 2, 1, 1, 1, 1])
             h1.write("**Date**")
             h2.write("**Wig Name**")
@@ -451,27 +453,25 @@ if authentication_status:
             h5.write("**User**")
             h6.write("**Action**")
             st.divider()
-
-            for index, row in d_df.head(10).iterrows():
+        
+            for index, row in d_df.iterrows():   # <-- show ALL rows, not just head(10)
                 r1, r2, r3, r4, r5, r6 = st.columns([1, 2, 1, 1, 1, 1])
                 r1.write(row['Date'])
                 r2.write(row['Wig Name'])
-                # Color code Type
                 type_color = "🟢" if row['Type'] == "Addition" else "🔴"
                 r3.write(f"{type_color} {row['Type']}")
                 r4.write(str(row['Quantity']))
                 r5.write(row['User'])
-                
-                if r6.button("🗑️", key=f"del_dep_{row['id']}"):
+        
+                # Delete button for each row
+                if r6.button("🗑️ Delete", key=f"del_dep_{row['id']}"):
                     supabase.table("Depot").delete().eq("id", row['id']).execute()
-                    st.success("Entry removed.")
+                    st.success(f"Deleted entry for {row['Wig Name']} on {row['Date']}")
                     time.sleep(0.5)
                     st.rerun()
         else:
             st.info("No activity recorded in the Depot yet.")
-
-        st.divider()
-
+    
         # 3. LOG IN OPTIONS (AT THE BOTTOM)
         st.subheader("Log Depot Movement")
         col_d1, col_d2 = st.columns([2, 1])
@@ -786,5 +786,6 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
