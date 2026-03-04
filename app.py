@@ -264,26 +264,23 @@ if authentication_status:
         with tab_dict["Inventory"]:
             st.header("📋 Physical Inventory Grid")
     
-            # Choose category
+            # --- Category & Location selection ---
             categories = sorted(master_inventory['Category'].unique().tolist())
             sel_cat = st.selectbox("Select Category", categories)
     
-            # Location handling
             if role == "Staff":
-                sel_loc = loc  # Staff locked to their assigned location
+                sel_loc = loc
                 st.write(f"📍 Location: {sel_loc}")
             else:
                 sel_loc = st.selectbox("Select Location", ["Pv", "Canape-Vert"])
     
-            # Filter Master Inventory by category + location
+            # --- Build grid (same as before) ---
             base_df = master_inventory[(master_inventory['Category'] == sel_cat) & 
                                        (master_inventory['Location'] == sel_loc)].copy()
     
-            # Fetch Exposed (Mannequin) and Depot data
             exp_df = pd.DataFrame(supabase.table("Mannequin").select("*").execute().data or [])
             dep_df = pd.DataFrame(supabase.table("Depot").select("*").execute().data or [])
     
-            # Calculate exposed and depot counts per SKU
             def get_exposed(sku, location):
                 if exp_df.empty: return 0
                 return int(exp_df[(exp_df['SKU'].str.lower() == sku.lower()) & 
@@ -295,7 +292,6 @@ if authentication_status:
                 return int(dm[dm['Type'] == "Addition"]['Quantity'].sum() - 
                            dm[dm['Type'] == "Withdrawal"]['Quantity'].sum())
     
-            # Build grid dataframe
             grid_df = pd.DataFrame({
                 "SKU": base_df['SKU'],
                 "Name": base_df['Full Name'],
@@ -306,7 +302,6 @@ if authentication_status:
                 "Returns": 0
             })
     
-            # Editable grid
             edited_df = st.data_editor(grid_df, num_rows="dynamic", use_container_width=True)
     
             if st.button("💾 Save Audit Records"):
@@ -329,6 +324,44 @@ if authentication_status:
     
                 st.success("Audit records saved for all rows!")
                 st.rerun()
+    
+            # --- History by Category ---
+            st.divider()
+            st.subheader("📜 Audit History by Category")
+            
+            try:
+                # Fetch all audit records
+                aud_log_res = supabase.table("Inventory").select("*").order("Date", desc=True).execute()
+                if aud_log_res.data:
+                    df_log = pd.DataFrame(aud_log_res.data)
+            
+                    # Filter by location if Staff
+                    if role == "Staff":
+                        df_log = df_log[df_log['Location'] == loc]
+            
+                    # Loop through categories
+                    for cat in sorted(df_log['Category'].unique()):
+                        st.markdown(f"### 📂 {cat}")
+                        cat_df = df_log[df_log['Category'] == cat]
+            
+                        st.dataframe(
+                            cat_df[['Date', 'Name', 'Total_Physical', 'System_Stock', 'Discrepancy', 'Counter_Name']],
+                            use_container_width=True,
+                            hide_index=True
+                        )
+            
+                        # Download option for each category
+                        csv = cat_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label=f"⬇️ Download {cat} History",
+                            data=csv,
+                            file_name=f"audit_history_{cat}.csv",
+                            mime="text/csv"
+                        )
+                else:
+                    st.info("No audit records found yet.")
+            except Exception as e:
+                st.error(f"Error fetching history: {e}")
 
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
     if "Mannequin" in tab_dict: 
@@ -769,6 +802,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
