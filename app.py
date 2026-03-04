@@ -341,15 +341,13 @@ if authentication_status:
         st.divider()
         d_search = st.text_input("🔍 Depot Search").lower()
         if d_search:
-            match = master_inventory[master_inventory['Full Name'].str.lower().contains(d_search)]
-            if not match.empty:
-                it = match.iloc[0]
-                with st.form("d_form"):
-                    t = st.radio("Type", ["Addition", "Withdrawal"])
-                    q = st.number_input("Qty", 1)
-                    if st.form_submit_button("Log"):
-                        supabase.table("Depot").insert({"Date": str(date.today()), "SKU": it['SKU'], "Wig Name": it['Full Name'], "Type": t, "Quantity": q, "User": username}).execute()
-                        st.rerun()
+    # Use .str.contains() correctly and search both Name and SKU
+    name_match = master_inventory['Full Name'].str.lower().str.contains(d_search.lower(), na=False)
+    sku_match = master_inventory['SKU'].str.lower().str.contains(d_search.lower(), na=False)
+    
+    match = master_inventory[name_match | sku_match]
+else:
+    match = pd.DataFrame()
 
     # --- 6. COMPARE TAB ---
     with tabs[5]:
@@ -546,11 +544,3 @@ if authentication_status:
         
 # --- FOOTER ---
 st.sidebar.caption(f"Dressupht ERP v6.0 | {date.today()}")
-
-
-
-
-
-
-
-
