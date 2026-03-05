@@ -254,7 +254,7 @@ if authentication_status:
             else:
                 st.info("No data in Master_Inventory.")
 
-    # --- 2. ARRIVAL TAB ---
+    # --- ARRIVAL TAB ---
     if "Arrival" in tab_dict: 
         with tab_dict["Arrival"]:
             st.header(t["arrival_header"])
@@ -308,7 +308,7 @@ if authentication_status:
                                         "category": st.session_state.arrival_verify["cat"],
                                         "quantity": int(arr_qty),
                                         "user": username,
-                                        "location": arr_loc
+                                        "location": arr_loc  # lowercase
                                     }
                                     supabase.table("Arrival").insert(arrival_data).execute()
                                     st.success(t["success"].format(qty=arr_qty, name=st.session_state.arrival_verify['name']))
@@ -445,7 +445,7 @@ if authentication_status:
             except Exception as e:
                 st.error(f"Error fetching history: {e}")
 
-    # --- 4. MANNEQUIN TAB ---
+    # --- MANNEQUIN TAB ---
     if "Mannequin" in tab_dict:
         with tab_dict["Mannequin"]:
             st.header(t["mannequin_header"])
@@ -473,8 +473,8 @@ if authentication_status:
                         r2.write(row['Full Name'])
                         r3.write(str(row['Quantity']))
                         r4.write(row['Last_Updated'])
-                        if r5.button("🗑️ Delete", key=f"del_man_{row['SKU']}_{row['Location']}"):
-                            supabase.table("Mannequin").delete().eq("SKU", row['SKU']).eq("Location", row['Location']).execute()
+                        if r5.button("🗑️ Delete", key=f"del_man_{row['SKU']}_{row['location']}"):
+                            supabase.table("Mannequin").delete().eq("SKU", row['SKU']).eq("location", row['location']).execute()
                             st.success(f"Removed {row['Full Name']} from display.")
                             time.sleep(0.5)
                             st.rerun()
@@ -508,10 +508,10 @@ if authentication_status:
                                 "SKU": str(m_item['SKU']),
                                 "Full Name": str(m_item['Full Name']),
                                 "Quantity": int(m_qty),
-                                "Location": str(m_loc),
+                                "location": str(m_loc),  # lowercase
                                 "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")
                             }
-                            supabase.table("Mannequin").delete().eq("SKU", m_item['SKU']).eq("Location", m_loc).execute()
+                            supabase.table("Mannequin").delete().eq("SKU", m_item['SKU']).eq("location", m_loc).execute()
                             supabase.table("Mannequin").insert(man_entry).execute()
                             st.success(f"Updated display for {m_item['Full Name']}!")
                             time.sleep(1)
@@ -519,7 +519,7 @@ if authentication_status:
                 else:
                     st.error("No item found in Master Inventory.")
 
-    # --- 5. DEPOT TAB ---
+    # --- DEPOT TAB ---
     if "Depot" in tab_dict:
         with tab_dict["Depot"]:
             st.header(t["depot_header"])
@@ -552,7 +552,7 @@ if authentication_status:
                     r3.write(f"{type_color} {row['Type']}")
                     r4.write(str(row['Quantity']))
                     r5.write(row['User'])
-                    r6.write(row['Location'])
+                    r6.write(row['location'])   # lowercase
                     if r7.button("🗑️ Delete", key=f"del_dep_{row['id']}"):
                         supabase.table("Depot").delete().eq("id", row['id']).execute()
                         st.success(f"Deleted entry for {row['Wig Name']} on {row['Date']}")
@@ -570,7 +570,7 @@ if authentication_status:
                                          placeholder="Search by SKU or Name...", 
                                          key="dep_search").lower()
     
-                # Use full inventory, but filter later by location
+                # Staff locked to their location, Admin/Manager can see all
                 if role == "Staff":
                     search_inventory_df = master_inventory[master_inventory['Location'] == loc].copy()
                 else:
@@ -613,7 +613,7 @@ if authentication_status:
                                     "Type": d_type,
                                     "Quantity": int(d_qty),
                                     "User": str(username),
-                                    "Location": d_loc
+                                    "location": d_loc   # lowercase
                                 }
                                 supabase.table("Depot").insert(dep_entry).execute()
                                 st.success(f"Recorded {d_type} for {d_item['Full Name']} at {d_loc}")
@@ -879,4 +879,5 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
