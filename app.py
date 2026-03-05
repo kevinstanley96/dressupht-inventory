@@ -7,6 +7,70 @@ import time
 import io
 import re
 
+# --- LANGUAGE SUPPORT ---
+translations = {
+    "en": {
+        "page_title": "Dressup Haiti Stock",
+        "logout": "Logout",
+        "arrival_header": "🚢 Arrival Management",
+        "restricted": "🔒 Access Denied. Only Admins and Managers can log new arrivals.",
+        "log_stock": "Log Received Stock",
+        "sku_input": "Scan or Enter SKU",
+        "not_found": "SKU not found in Master Inventory. Please check the Library.",
+        "item": "Item",
+        "category": "Category",
+        "arrival_date": "Arrival Date",
+        "quantity": "Quantity Received",
+        "location": "Receiving Location",
+        "confirm": "✅ Confirm Arrival",
+        "success": "Logged {qty} units of {name}",
+        "history": "Arrival History",
+        "no_logs": "No arrivals logged yet.",
+        "showing": "Showing {count} arrivals",
+        "error_log": "Could not load arrival logs.",
+        "library_header": "📚 Library",
+        "inventory_header": "📋 Physical Inventory Grid",
+        "mannequin_header": "👤 Mannequin Display Management",
+        "depot_header": "📦 Depot Management",
+        "compare_header": "🔄 Stock Comparison",
+        "sales_header": "💰 Sales Management",
+        "admin_header": "⚙️ Admin Panel",
+        "password_header": "🔑 Change Password"
+    },
+    "fr": {
+        "page_title": "Stock Dressup Haïti",
+        "logout": "Déconnexion",
+        "arrival_header": "🚢 Gestion des Arrivées",
+        "restricted": "🔒 Accès refusé. Seuls les administrateurs et les gestionnaires peuvent enregistrer de nouvelles arrivées.",
+        "log_stock": "Enregistrer le stock reçu",
+        "sku_input": "Scanner ou entrer le SKU",
+        "not_found": "SKU introuvable dans l'inventaire principal. Veuillez vérifier la bibliothèque.",
+        "item": "Article",
+        "category": "Catégorie",
+        "arrival_date": "Date d'arrivée",
+        "quantity": "Quantité reçue",
+        "location": "Lieu de réception",
+        "confirm": "✅ Confirmer l'arrivée",
+        "success": "Enregistré {qty} unités de {name}",
+        "history": "Historique des arrivées",
+        "no_logs": "Aucune arrivée enregistrée.",
+        "showing": "Affichage de {count} arrivées",
+        "error_log": "Impossible de charger les journaux d'arrivée.",
+        "library_header": "📚 Bibliothèque",
+        "inventory_header": "📋 Grille d'inventaire physique",
+        "mannequin_header": "👤 Gestion des mannequins",
+        "depot_header": "📦 Gestion du dépôt",
+        "compare_header": "🔄 Comparaison des stocks",
+        "sales_header": "💰 Gestion des ventes",
+        "admin_header": "⚙️ Panneau d'administration",
+        "password_header": "🔑 Changer le mot de passe"
+    }
+}
+
+# --- LANGUAGE SELECTOR ---
+lang = st.sidebar.selectbox("🌐 Language / Langue", ["en", "fr"])
+t = translations[lang]
+
 def sanitize_sheet_name(name: str) -> str:
     # Removes: / \ ? * [ ] :
     # We use a raw string (r'') and escape the backslash and brackets
@@ -119,7 +183,7 @@ if authentication_status:
                         time.sleep(1)
                         st.rerun()
         
-        authenticator.logout('Logout', 'sidebar')
+        authenticator.logout(t["logout"], 'sidebar')
 
     # --- TABS SETUP BASED ON ROLE ---
     if role == "Staff":
@@ -136,8 +200,9 @@ if authentication_status:
     tab_dict = {name: tabs[i] for i, name in enumerate(tab_list)}
 
     # --- 1. LIBRARY TAB ---
-    if "Library" in tab_dict: 
+    if "Library" in tab_dict:
         with tab_dict["Library"]:
+            st.header(t["library_header"])
             try:
                 query = supabase.table("Master_Inventory").select("*").execute()
                 master_inventory = pd.DataFrame(query.data)
@@ -192,7 +257,7 @@ if authentication_status:
     # --- 2. ARRIVAL TAB ---
     if "Arrival" in tab_dict: 
         with tab_dict["Arrival"]:
-            st.header("🚢 Arrival Management")
+            st.header(t["arrival_header"])
             
             # Restriction: Only Admins and Managers
             if role not in ["Admin", "Manager"]:
@@ -282,9 +347,9 @@ if authentication_status:
                         st.error(f"Could not load arrival logs: {e}")
 
     # --- 3. INVENTORY (AUDIT) TAB ---    
-    if "Inventory" in tab_dict: 
+    if "Inventory" in tab_dict:
         with tab_dict["Inventory"]:
-            st.header("📋 Physical Inventory Grid")
+            st.header(t["inventory_header"])
     
             # --- ENTRY LOGIC ---
             try:
@@ -391,9 +456,9 @@ if authentication_status:
                 st.error(f"Error fetching history: {e}")
 
     # --- 4. MANNEQUIN (EXPOSED) TAB ---
-    if "Mannequin" in tab_dict: 
+    if "Mannequin" in tab_dict:
         with tab_dict["Mannequin"]:
-            st.header("👤 Mannequin Display Management")
+            st.header(t["mannequin_header"])
     
             # 1. FETCH & DISPLAY HISTORY (AT THE TOP)
             st.subheader("Current Wigs on Display")
@@ -478,9 +543,9 @@ if authentication_status:
                     st.error("No item found in Master Inventory.")
 
     # --- 5. DEPOT (BIG DEPOT) TAB ---
-    if "Depot" in tab_dict: 
+    if "Depot" in tab_dict:
         with tab_dict["Depot"]:
-            st.header("📦 Depot Management ")
+            st.header(t["depot_header"])
     
             # 1. FETCH DEPOT DATA
             try:
@@ -573,9 +638,9 @@ if authentication_status:
                         st.error("Item not found in PV inventory.")
 
     # --- 6. COMPARE TAB ---
-    if "Compare" in tab_dict: 
+    if "Compare" in tab_dict:
         with tab_dict["Compare"]:
-            st.header("🔄 Stock Comparison ")
+            st.header(t["compare_header"])
     
             if not master_inventory.empty:
                 # --- PART A: SIDE-BY-SIDE COMPARISON ---
@@ -639,9 +704,9 @@ if authentication_status:
                 st.info("Please upload inventory files in the sidebar to perform comparison.")
 
     # --- 7. SALES (FAST/SLOW MOVERS) ---
-    if "Sales" in tab_dict: 
+    if "Sales" in tab_dict:
         with tab_dict["Sales"]:
-            st.header("💰 Sales Analysis ")
+            st.header(t["sales_header"])
             
             # 1. Upload Old Export
             old_file = st.file_uploader("Upload Old Square Export (Excel)", type=['xlsx'], key="sales_old_file")
@@ -709,9 +774,9 @@ if authentication_status:
                 st.info("Upload an older Square export to calculate sales movement against current PV stock.")
 
     # --- 8. ADMIN TAB ---
-    if "Admin" in tab_dict: 
+    if "Admin" in tab_dict:
         with tab_dict["Admin"]:
-            st.header("⚙️ Admin Control ")
+            st.header(t["admin_header"])
             
             # Restriction: Strictly Admin Only
             if role != "Admin":
@@ -819,9 +884,9 @@ if authentication_status:
                         st.info("To clear or reset database tables, please use the Supabase SQL Editor for safety.")
 
     # --- 9. PASSWORD TAB ---
-    if "Password" in tab_dict: 
+    if "Password" in tab_dict:
         with tab_dict["Password"]:
-            st.header("🔑 Password Management")
+            st.header(t["password_header"])
             # Pre-integrated reset from the library
             authenticator.reset_password(username=username)
 
@@ -829,26 +894,3 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
