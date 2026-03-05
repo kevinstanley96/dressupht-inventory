@@ -191,50 +191,50 @@ if authentication_status:
 
     # --- 2. ARRIVAL TAB ---
     if "Arrival" in tab_dict:
-    with tab_dict["Arrival"]:
-        st.header("📦 Wig Arrivals")
-
-        # --- ENTRY FORM ---
-        arr_date = datetime.now()   # current timestamp
-        arr_loc = st.selectbox("Select Location", sorted(master_inventory['Location'].unique()))
-        arr_qty = st.number_input("Quantity", min_value=1, step=1)
-
-        if st.button("✅ Log Arrival"):
+        with tab_dict["Arrival"]:
+            st.header("📦 Wig Arrivals")
+    
+            # --- ENTRY FORM ---
+            arr_date = datetime.now()   # current timestamp
+            arr_loc = st.selectbox("Select Location", sorted(master_inventory['Location'].unique()))
+            arr_qty = st.number_input("Quantity", min_value=1, step=1)
+    
+            if st.button("✅ Log Arrival"):
+                try:
+                    arrival_data = {
+                        "date": datetime.now().isoformat(),   # timestampz expects ISO format
+                        "sku": st.session_state.arrival_verify["sku"],
+                        "wig_name": st.session_state.arrival_verify["name"],
+                        "category": st.session_state.arrival_verify["cat"],
+                        "quantity": int(arr_qty),
+                        "user": username,
+                        "location": arr_loc
+                    }
+                    supabase.table("Arrival").insert(arrival_data).execute()
+                    st.success("Arrival logged successfully!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error logging arrival: {e}")
+    
+            st.divider()
+            st.subheader("📜 Arrival History")
+    
+            # --- HISTORY VIEW ---
             try:
-                arrival_data = {
-                    "date": datetime.now().isoformat(),   # timestampz expects ISO format
-                    "sku": st.session_state.arrival_verify["sku"],
-                    "wig_name": st.session_state.arrival_verify["name"],
-                    "category": st.session_state.arrival_verify["cat"],
-                    "quantity": int(arr_qty),
-                    "user": username,
-                    "location": arr_loc
-                }
-                supabase.table("Arrival").insert(arrival_data).execute()
-                st.success("Arrival logged successfully!")
-                st.rerun()
+                arr_log = supabase.table("Arrival").select("*").order("date", desc=True).execute()
+                if arr_log.data:
+                    log_df = pd.DataFrame(arr_log.data)
+    
+                    st.dataframe(
+                        log_df[['date', 'wig_name', 'sku', 'category', 'quantity', 'location', 'user']],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    st.caption(f"Showing {len(log_df)} arrivals")
+                else:
+                    st.info("No arrivals logged yet.")
             except Exception as e:
-                st.error(f"Error logging arrival: {e}")
-
-        st.divider()
-        st.subheader("📜 Arrival History")
-
-        # --- HISTORY VIEW ---
-        try:
-            arr_log = supabase.table("Arrival").select("*").order("date", desc=True).execute()
-            if arr_log.data:
-                log_df = pd.DataFrame(arr_log.data)
-
-                st.dataframe(
-                    log_df[['date', 'wig_name', 'sku', 'category', 'quantity', 'location', 'user']],
-                    use_container_width=True,
-                    hide_index=True
-                )
-                st.caption(f"Showing {len(log_df)} arrivals")
-            else:
-                st.info("No arrivals logged yet.")
-        except Exception as e:
-            st.error(f"Could not load arrival logs: {e}")
+                st.error(f"Could not load arrival logs: {e}")
 
     # --- 3. INVENTORY (AUDIT) TAB ---    
     if "Inventory" in tab_dict: 
@@ -784,6 +784,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
