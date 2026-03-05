@@ -257,7 +257,7 @@ if authentication_status:
                     st.subheader("Recent Arrivals")
                     try:
                         # Fetch ALL logs from the Arrival table
-                        arr_log = supabase.table("Arrival").select("*").order("Date", desc=True).execute()
+                        arr_log = supabase.table("Arrival").select("*").order("date", desc=True
                         if arr_log.data:
                             log_df = pd.DataFrame(arr_log.data)
                             st.dataframe(
@@ -819,6 +819,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
