@@ -201,6 +201,10 @@ if authentication_status:
                 # Initialize session state for SKU verification if not exists
                 if 'arrival_verify' not in st.session_state:
                     st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
+    
+                # Initialize session state for sticky arrival_date
+                if 'arrival_date' not in st.session_state:
+                    st.session_state.arrival_date = date.today()
         
                 col1, col2 = st.columns([1, 2])
         
@@ -228,7 +232,8 @@ if authentication_status:
                         st.info(f"**Item:** {st.session_state.arrival_verify['name']}\n\n**Category:** {st.session_state.arrival_verify['cat']}")
                         
                         with st.form("arrival_form", clear_on_submit=True):
-                            arr_date = st.date_input("Arrival Date", value=date.today())
+                            # Sticky date: defaults to last used value
+                            arr_date = st.date_input("Arrival Date", value=st.session_state.arrival_date)
                             arr_qty = st.number_input("Quantity Received", min_value=1, step=1)
                             arr_loc = st.selectbox("Receiving Location", ["Pv", "Canape-Vert"])
                             
@@ -247,6 +252,11 @@ if authentication_status:
                                     supabase.table("Arrival").insert(arrival_data).execute()
                                     
                                     st.success(f"Logged {arr_qty} units of {st.session_state.arrival_verify['name']}")
+                                    
+                                    # Update sticky date to last used value
+                                    st.session_state.arrival_date = arr_date
+                                    
+                                    # Reset SKU verification for next scan
                                     st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
                                     time.sleep(1)
                                     st.rerun()
@@ -819,6 +829,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
