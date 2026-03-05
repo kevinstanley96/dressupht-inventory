@@ -257,8 +257,8 @@ if authentication_status:
                 with col2:
                     st.subheader("Recent Arrivals")
                     try:
-                        # Fetch logs from the Arrival table
-                        arr_log = supabase.table("Arrival").select("*").order("Date", desc=True).limit(20).execute()
+                        # Fetch ALL logs from the Arrival table
+                        arr_log = supabase.table("Arrival").select("*").order("Date", desc=True).execute()
                         if arr_log.data:
                             log_df = pd.DataFrame(arr_log.data)
                             st.dataframe(
@@ -266,8 +266,9 @@ if authentication_status:
                                 use_container_width=True, 
                                 hide_index=True
                             )
+                            st.caption(f"Showing {len(log_df)} arrivals")
                         else:
-                            st.write("No recent arrivals logged.")
+                            st.write("No arrivals logged yet.")
                     except Exception:
                         st.error("Could not load arrival logs.")
 
@@ -819,6 +820,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
