@@ -236,17 +236,17 @@ if authentication_status:
                             
                             if st.form_submit_button("✅ Confirm Arrival"):
                                 arrival_data = {
-                                    "Date": str(arr_date),
+                                    "Date": datetime.now().isoformat(),   # timestampz expects ISO format
                                     "SKU": st.session_state.arrival_verify["sku"],
-                                    "Wig Name": st.session_state.arrival_verify["name"],
+                                    "Wig Name": st.session_state.arrival_verify["name"],  # must match column name exactly
                                     "Category": st.session_state.arrival_verify["cat"],
-                                    "Quantity": arr_qty,
+                                    "Quantity": int(arr_qty),
                                     "User": username,
                                     "Location": arr_loc
                                 }
                                 
-                                # Insert into Supabase 'Arrival' table
                                 supabase.table("Arrival").insert(arrival_data).execute()
+
                                 
                                 st.success(f"Logged {arr_qty} units of {st.session_state.arrival_verify['name']}")
                                 # Clear verification state for next scan
@@ -820,6 +820,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
