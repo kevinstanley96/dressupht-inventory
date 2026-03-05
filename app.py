@@ -259,29 +259,22 @@ if authentication_status:
         with tab_dict["Arrival"]:
             st.header(t["arrival_header"])
             
-            # Restriction: Only Admins and Managers
             if role not in ["Admin", "Manager"]:
-                st.warning("🔒 Access Denied. Only Admins and Managers can log new arrivals.")
+                st.warning(t["restricted"])
             else:
-                # Initialize session state for SKU verification if not exists
                 if 'arrival_verify' not in st.session_state:
                     st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
-    
-                # Initialize session state for sticky arrival_date
                 if 'arrival_date' not in st.session_state:
                     st.session_state.arrival_date = date.today()
-        
+    
                 col1, col2 = st.columns([1, 2])
-        
+    
                 with col1:
-                    st.subheader("Log Received Stock")
-                    # A. SKU Entry
-                    in_sku = st.text_input("Scan or Enter SKU", key="arr_sku_input").strip()
+                    st.subheader(t["log_stock"])
+                    in_sku = st.text_input(t["sku_input"], key="arr_sku_input").strip()
                     
-                    # Trigger lookup when SKU changes
                     if in_sku and in_sku != st.session_state.arrival_verify["sku"]:
                         match = master_inventory[master_inventory['SKU'].str.lower() == in_sku.lower()]
-                        
                         if not match.empty:
                             st.session_state.arrival_verify = {
                                 "name": match['Full Name'].iloc[0],
@@ -290,19 +283,23 @@ if authentication_status:
                             }
                         else:
                             st.session_state.arrival_verify = {"name": None, "cat": None, "sku": in_sku}
-                            st.error("SKU not found in Master Inventory. Please check the Library.")
-        
-                    # B. Data Entry Form (Only shows if SKU is verified)
+                            st.error(t["not_found"])
+    
                     if st.session_state.arrival_verify["name"]:
-                        st.info(f"**Item:** {st.session_state.arrival_verify['name']}\n\n**Category:** {st.session_state.arrival_verify['cat']}")
+                        st.info(f"**{t['item']}:** {st.session_state.arrival_verify['name']}\n\n**{t['category']}:** {st.session_state.arrival_verify['cat']}")
                         
                         with st.form("arrival_form", clear_on_submit=True):
-                            # Sticky date: defaults to last used value
-                            arr_date = st.date_input("Arrival Date", value=st.session_state.arrival_date)
-                            arr_qty = st.number_input("Quantity Received", min_value=1, step=1)
-                            arr_loc = st.selectbox("Receiving Location", ["Pv", "Canape-Vert"])
-                            
-                            if st.form_submit_button("✅ Confirm Arrival"):
+                            arr_date = st.date_input(t["arrival_date"], value=st.session_state.arrival_date)
+                            arr_qty = st.number_input(t["quantity"], min_value=1, step=1)
+    
+                            # Location logic
+                            if role in ["Admin", "Manager"]:
+                                arr_loc = st.selectbox(t["location"], ["Pv", "Canape-Vert"])
+                            else:
+                                arr_loc = loc
+                                st.write(f"📍 {t['location']}: {loc}")
+    
+                            if st.form_submit_button(t["confirm"]):
                                 try:
                                     arrival_data = {
                                         "date": datetime.combine(arr_date, datetime.now().time()).isoformat(),
@@ -313,25 +310,18 @@ if authentication_status:
                                         "user": username,
                                         "location": arr_loc
                                     }
-                                    
                                     supabase.table("Arrival").insert(arrival_data).execute()
-                                    
-                                    st.success(f"Logged {arr_qty} units of {st.session_state.arrival_verify['name']}")
-                                    
-                                    # Update sticky date to last used value
+                                    st.success(t["success"].format(qty=arr_qty, name=st.session_state.arrival_verify['name']))
                                     st.session_state.arrival_date = arr_date
-                                    
-                                    # Reset SKU verification for next scan
                                     st.session_state.arrival_verify = {"name": None, "cat": None, "sku": ""}
                                     time.sleep(1)
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Error logging arrival: {e}")
-        
+                                    st.error(f"{t['error_log']}: {e}")
+    
                 with col2:
-                    st.subheader("Arrival History")
+                    st.subheader(t["history"])
                     try:
-                        # Fetch ALL logs from the Arrival table
                         arr_log = supabase.table("Arrival").select("*").order("date", desc=True).execute()
                         if arr_log.data:
                             log_df = pd.DataFrame(arr_log.data)
@@ -340,11 +330,11 @@ if authentication_status:
                                 use_container_width=True, 
                                 hide_index=True
                             )
-                            st.caption(f"Showing {len(log_df)} arrivals")
+                            st.caption(t["showing"].format(count=len(log_df)))
                         else:
-                            st.write("No arrivals logged yet.")
+                            st.write(t["no_logs"])
                     except Exception as e:
-                        st.error(f"Could not load arrival logs: {e}")
+                        st.error(f"{t['error_log']}: {e}")
 
     # --- 3. INVENTORY (AUDIT) TAB ---    
     if "Inventory" in tab_dict:
@@ -455,24 +445,20 @@ if authentication_status:
             except Exception as e:
                 st.error(f"Error fetching history: {e}")
 
-    # --- 4. MANNEQUIN (EXPOSED) TAB ---
+    # --- 4. MANNEQUIN TAB ---
     if "Mannequin" in tab_dict:
         with tab_dict["Mannequin"]:
             st.header(t["mannequin_header"])
     
-            # 1. FETCH & DISPLAY HISTORY (AT THE TOP)
             st.subheader("Current Wigs on Display")
             try:
                 m_query = supabase.table("Mannequin").select("*").execute()
                 m_df = pd.DataFrame(m_query.data) if m_query.data else pd.DataFrame()
                 
                 if not m_df.empty:
-                    # Sort by Last_Updated string so newest entries appear first
                     m_df = m_df.sort_values(by="Last_Updated", ascending=False)
-    
                     st.write(f"**Total Items on Display:** {int(m_df['Quantity'].sum())}")
     
-                    # Table Header
                     h1, h2, h3, h4, h5 = st.columns([1, 2, 1, 2, 1])
                     h1.write("**SKU**")
                     h2.write("**Name**")
@@ -481,15 +467,12 @@ if authentication_status:
                     h5.write("**Action**")
                     st.divider()
     
-                    # Row display with Delete functionality based on SKU + Location
                     for index, row in m_df.iterrows():
                         r1, r2, r3, r4, r5 = st.columns([1, 2, 1, 2, 1])
                         r1.write(row['SKU'])
                         r2.write(row['Full Name'])
                         r3.write(str(row['Quantity']))
                         r4.write(row['Last_Updated'])
-                        
-                        # DELETE BUTTON: Uses SKU and Location to find the row
                         if r5.button("🗑️ Delete", key=f"del_man_{row['SKU']}_{row['Location']}"):
                             supabase.table("Mannequin").delete().eq("SKU", row['SKU']).eq("Location", row['Location']).execute()
                             st.success(f"Removed {row['Full Name']} from display.")
@@ -501,28 +484,25 @@ if authentication_status:
                 st.error(f"Error loading Mannequin history: {e}")
     
             st.divider()
-    
-            # 2. LOG IN OPTIONS (AT THE BOTTOM)
             st.subheader("Add/Update Display")
-            
-            # Tokenized Search (Name or SKU)
+    
             m_search = st.text_input("🔍 Search Item to Display", placeholder="Type Name or SKU...").lower()
-            
             if m_search:
-                tokens = m_search.split()
-                match = master_inventory.copy()
-                for t in tokens:
-                    match = search_inventory(master_inventory, m_search)
-                
+                match = search_inventory(master_inventory, m_search)
                 if not match.empty:
                     m_item = match.iloc[0]
                     st.success(f"Selected: **{m_item['Full Name']}** ({m_item['SKU']})")
-                    
+    
                     with st.form("man_form", clear_on_submit=True):
-                        # Constraints: Max 2, Current Date only
                         m_qty = st.number_input("Quantity", min_value=1, max_value=2, step=1)
-                        m_loc = st.selectbox("Location", ["Pv", "Canape-Vert"], index=0 if m_item['Location'] == "Pv" else 1)
-                        
+    
+                        # Location logic
+                        if role in ["Admin", "Manager"]:
+                            m_loc = st.selectbox(t["location"], ["Pv", "Canape-Vert"], index=0 if m_item['Location'] == "Pv" else 1)
+                        else:
+                            m_loc = loc
+                            st.write(f"📍 {t['location']}: {loc}")
+    
                         if st.form_submit_button("🚀 Set on Mannequin"):
                             man_entry = {
                                 "SKU": str(m_item['SKU']),
@@ -531,18 +511,15 @@ if authentication_status:
                                 "Location": str(m_loc),
                                 "Last_Updated": datetime.now().strftime("%Y-%m-%d %H:%M")
                             }
-                            
-                            # Upsert logic: Delete existing for that SKU+Location then insert fresh
                             supabase.table("Mannequin").delete().eq("SKU", m_item['SKU']).eq("Location", m_loc).execute()
                             supabase.table("Mannequin").insert(man_entry).execute()
-                            
                             st.success(f"Updated display for {m_item['Full Name']}!")
                             time.sleep(1)
                             st.rerun()
                 else:
                     st.error("No item found in Master Inventory.")
 
-    # --- 5. DEPOT (BIG DEPOT) TAB ---
+    # --- 5. DEPOT TAB ---
     if "Depot" in tab_dict:
         with tab_dict["Depot"]:
             st.header(t["depot_header"])
@@ -556,70 +533,78 @@ if authentication_status:
     
             # 2. DISPLAY LOG (AT THE TOP)
             st.subheader("Depot Activity History")
-            
             if not d_df.empty:
-                h1, h2, h3, h4, h5, h6 = st.columns([1, 2, 1, 1, 1, 1])
+                h1, h2, h3, h4, h5, h6, h7 = st.columns([1, 2, 1, 1, 1, 1, 1])
                 h1.write("**Date**")
                 h2.write("**Wig Name**")
                 h3.write("**Type**")
                 h4.write("**Qty**")
                 h5.write("**User**")
-                h6.write("**Action**")
+                h6.write("**Location**")
+                h7.write("**Action**")
                 st.divider()
-            
+    
                 for index, row in d_df.iterrows():
-                    r1, r2, r3, r4, r5, r6 = st.columns([1, 2, 1, 1, 1, 1])
+                    r1, r2, r3, r4, r5, r6, r7 = st.columns([1, 2, 1, 1, 1, 1, 1])
                     r1.write(row['Date'])
                     r2.write(row['Wig Name'])
                     type_color = "🟢" if row['Type'] == "Addition" else "🔴"
                     r3.write(f"{type_color} {row['Type']}")
                     r4.write(str(row['Quantity']))
                     r5.write(row['User'])
-            
-                    if r6.button("🗑️ Delete", key=f"del_dep_{row['id']}"):
+                    r6.write(row['Location'])
+                    if r7.button("🗑️ Delete", key=f"del_dep_{row['id']}"):
                         supabase.table("Depot").delete().eq("id", row['id']).execute()
                         st.success(f"Deleted entry for {row['Wig Name']} on {row['Date']}")
                         time.sleep(0.5)
                         st.rerun()
             else:
                 st.info("No activity recorded in the Depot yet.")
-        
+    
             # 3. LOG IN OPTIONS (AT THE BOTTOM)
             st.subheader("Log Depot Movement")
             col_d1, col_d2 = st.columns([2, 1])
     
             with col_d1:
-                d_search = st.text_input("🔍 Search Item for Depot (PV only)", 
+                d_search = st.text_input("🔍 Search Item for Depot", 
                                          placeholder="Search by SKU or Name...", 
                                          key="dep_search").lower()
-                
-                # Only use PV inventory for Depot searches
-                pv_inventory = master_inventory[master_inventory['Location'] == "Pv"].copy()
+    
+                # Use full inventory, but filter later by location
+                if role == "Staff":
+                    search_inventory_df = master_inventory[master_inventory['Location'] == loc].copy()
+                else:
+                    search_inventory_df = master_inventory.copy()
     
                 if d_search:
-                    match = search_inventory(pv_inventory, d_search)
-                
+                    match = search_inventory(search_inventory_df, d_search)
                     if not match.empty:
                         options = match[['SKU', 'Full Name']].apply(lambda x: f"{x['SKU']} - {x['Full Name']}", axis=1).tolist()
                         selected_option = st.selectbox("Select Item", options)
-                
                         selected_sku = selected_option.split(" - ")[0]
                         d_item = match[match['SKU'] == selected_sku].iloc[0]
-                
+    
                         st.success(f"Selected: **{d_item['Full Name']}** ({d_item['SKU']})")
-                
+    
                         if not d_df.empty:
                             sku_df = d_df[d_df['SKU'] == d_item['SKU']]
                             adds = sku_df[sku_df['Type'] == "Addition"]['Quantity'].sum()
                             subs = sku_df[sku_df['Type'] == "Withdrawal"]['Quantity'].sum()
                             net_depot = adds - subs
                             st.metric("Current Net in Depot", f"{int(net_depot)} units")
-                
+    
                         with st.form("depot_form", clear_on_submit=True):
                             d_type = st.radio("Movement Type", ["Addition", "Withdrawal"], horizontal=True)
                             d_qty = st.number_input("Quantity", min_value=1, step=1)
                             d_date = st.date_input("Date", value=date.today())
-                
+    
+                            # Location logic
+                            if role in ["Admin", "Manager"]:
+                                d_loc = st.selectbox(t["location"], ["Pv", "Canape-Vert"])
+                            else:
+                                d_loc = loc
+                                st.write(f"📍 {t['location']}: {loc}")
+    
                             if st.form_submit_button("Confirm Depot Entry"):
                                 dep_entry = {
                                     "Date": str(d_date),
@@ -627,15 +612,15 @@ if authentication_status:
                                     "Wig Name": str(d_item['Full Name']),
                                     "Type": d_type,
                                     "Quantity": int(d_qty),
-                                    "User": str(username)
+                                    "User": str(username),
+                                    "Location": d_loc
                                 }
-                
                                 supabase.table("Depot").insert(dep_entry).execute()
-                                st.success(f"Recorded {d_type} for {d_item['Full Name']}")
+                                st.success(f"Recorded {d_type} for {d_item['Full Name']} at {d_loc}")
                                 time.sleep(1)
                                 st.rerun()
                     else:
-                        st.error("Item not found in PV inventory.")
+                        st.error("Item not found in inventory.")
 
     # --- 6. COMPARE TAB ---
     if "Compare" in tab_dict:
@@ -894,3 +879,4 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
