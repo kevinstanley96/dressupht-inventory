@@ -261,7 +261,7 @@ if authentication_status:
                         if arr_log.data:
                             log_df = pd.DataFrame(arr_log.data)
                             st.dataframe(
-                                log_df[['Date', 'Wig Name', 'Quantity', 'Location', 'User']], 
+                                log_df[['date', 'wig_name', 'quantity', 'location', 'user']], 
                                 use_container_width=True, 
                                 hide_index=True
                             )
@@ -819,6 +819,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
