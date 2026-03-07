@@ -32,6 +32,7 @@ translations = {
         "inventory_header": "📋 Physical Inventory Grid",
         "mannequin_header": "👤 Mannequin Display Management",
         "depot_header": "📦 Depot Management",
+        "transfer_header": "➡️ Transfer to CV",
         "compare_header": "🔄 Stock Comparison",
         "sales_header": "💰 Sales Management",
         "admin_header": "⚙️ Admin Panel",
@@ -60,6 +61,7 @@ translations = {
         "inventory_header": "📋 Grille d'inventaire physique",
         "mannequin_header": "👤 Gestion des mannequins",
         "depot_header": "📦 Gestion du dépôt",
+        "transfer_header": "➡️ Transfert vers CV",
         "compare_header": "🔄 Comparaison des stocks",
         "sales_header": "💰 Gestion des ventes",
         "admin_header": "⚙️ Panneau d'administration",
@@ -189,9 +191,9 @@ if authentication_status:
     if role == "Staff":
         tab_list = ["Library", "Mannequin", "Depot", "Password"]
     elif role == "Manager":
-        tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Password"]
+        tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Transfer", "Compare", "Password"]
     elif role == "Admin":
-        tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Compare", "Sales", "Admin", "Password"]
+        tab_list = ["Library", "Arrival", "Inventory", "Mannequin", "Depot", "Transfer", "Compare", "Sales", "Admin", "Password"]
     else:
         tab_list = ["Library", "Password"]
     
@@ -696,6 +698,84 @@ if authentication_status:
             else:
                 st.info("Please upload inventory files in the sidebar to perform comparison.")
 
+    # --- TRANSFER TAB ---
+    if "Transfer" in tab_dict:
+        with tab_dict["Transfer"]:
+            st.header("🔄 Transfer to Canape-Vert")
+    
+            # 1. FETCH TRANSFER HISTORY
+            try:
+                t_query = supabase.table("Transfer").select("*").order("Date", desc=True).execute()
+                t_df = pd.DataFrame(t_query.data) if t_query.data else pd.DataFrame()
+            except Exception:
+                t_df = pd.DataFrame()
+    
+            st.subheader("Transfer History")
+            if not t_df.empty:
+                h1, h2, h3, h4, h5, h6 = st.columns([1, 2, 1, 1, 1, 1])
+                h1.write("**Date**")
+                h2.write("**Wig Name**")
+                h3.write("**Qty**")
+                h4.write("**From**")
+                h5.write("**To**")
+                h6.write("**User**")
+                st.divider()
+    
+                for index, row in t_df.iterrows():
+                    r1, r2, r3, r4, r5, r6 = st.columns([1, 2, 1, 1, 1, 1])
+                    r1.write(row['Date'])
+                    r2.write(row['Wig Name'])
+                    r3.write(str(row['Quantity']))
+                    r4.write(row['from_location'])
+                    r5.write(row['to_location'])
+                    r6.write(row['User'])
+            else:
+                st.info("No transfers recorded yet.")
+    
+            st.divider()
+            st.subheader("Log New Transfer (PV → Canape-Vert)")
+    
+            # 2. LOG NEW TRANSFER
+            col_t1, col_t2 = st.columns([2, 1])
+            with col_t1:
+                t_search = st.text_input("🔍 Search PV Inventory", 
+                                         placeholder="Search by SKU or Name...", 
+                                         key="transfer_search").lower()
+    
+                # Only PV inventory is eligible for transfer
+                pv_inventory = master_inventory[master_inventory['Location'] == "Pv"].copy()
+    
+                if t_search:
+                    match = search_inventory(pv_inventory, t_search)
+                    if not match.empty:
+                        options = match[['SKU', 'Full Name']].apply(lambda x: f"{x['SKU']} - {x['Full Name']}", axis=1).tolist()
+                        selected_option = st.selectbox("Select Item", options)
+                        selected_sku = selected_option.split(" - ")[0]
+                        t_item = match[match['SKU'] == selected_sku].iloc[0]
+    
+                        st.success(f"Selected: **{t_item['Full Name']}** ({t_item['SKU']})")
+    
+                        with st.form("transfer_form", clear_on_submit=True):
+                            t_qty = st.number_input("Quantity to Transfer", min_value=1, step=1)
+                            t_date = st.date_input("Date", value=date.today())
+    
+                            if st.form_submit_button("Confirm Transfer"):
+                                transfer_entry = {
+                                    "Date": str(t_date),
+                                    "SKU": str(t_item['SKU']),
+                                    "Wig Name": str(t_item['Full Name']),
+                                    "Quantity": int(t_qty),
+                                    "from_location": "Pv",
+                                    "to_location": "Canape-Vert",
+                                    "User": str(username)
+                                }
+                                supabase.table("Transfer").insert(transfer_entry).execute()
+                                st.success(f"Transferred {t_qty} units of {t_item['Full Name']} from PV to Canape-Vert")
+                                time.sleep(1)
+                                st.rerun()
+                    else:
+                        st.error("Item not found in PV inventory.")
+
     # --- 7. SALES (FAST/SLOW MOVERS) ---
     if "Sales" in tab_dict:
         with tab_dict["Sales"]:
@@ -887,6 +967,7 @@ elif authentication_status is False:
     st.error('Username/password is incorrect')
 elif authentication_status is None:
     st.warning('Please login')
+
 
 
 
